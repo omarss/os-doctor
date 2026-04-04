@@ -1,0 +1,736 @@
+#!/usr/bin/env bash
+# ~/.bashrc — Omar's dev environment for WSL2 / Ubuntu
+#
+# Sections:
+#   1. Oh My Bash
+#   2. PATH & environment
+#   3. Shell settings
+#   4. Aliases
+#   5. Utility functions
+#   6. fzf integration
+#   7. update()   — upgrade all package managers in one shot
+#   8. install()  — bootstrap a fresh Ubuntu/WSL from scratch
+#   9. doctor()   — verify & auto-fix the dev environment
+
+# ─── 1. Oh My Bash ───────────────────────────────────────────────────────────
+
+# Non-interactive shells (scp, rsync, scripts) bail out here.
+case $- in
+  *i*) ;;
+    *) return;;
+esac
+
+export OSH="$HOME/.oh-my-bash"
+OSH_THEME="font"
+OMB_USE_SUDO=true
+
+completions=(git composer ssh)
+aliases=(general)
+plugins=(git bashmarks)
+
+source "$OSH"/oh-my-bash.sh
+
+# ─── 2. PATH & environment ───────────────────────────────────────────────────
+
+[[ -d "$HOME/.local/bin" ]] && export PATH="$HOME/.local/bin:$PATH"
+[[ -d "$HOME/bin" ]]       && export PATH="$HOME/bin:$PATH"
+
+# Homebrew
+[[ -x /home/linuxbrew/.linuxbrew/bin/brew ]] \
+  && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+# Rust / Cargo
+[[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
+
+# NVM / Node
+export NVM_DIR="$HOME/.nvm"
+[[ -s "$NVM_DIR/nvm.sh" ]]          && . "$NVM_DIR/nvm.sh"
+[[ -s "$NVM_DIR/bash_completion" ]] && . "$NVM_DIR/bash_completion"
+
+# SDKMAN / Java
+[[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && . "$HOME/.sdkman/bin/sdkman-init.sh"
+
+# pnpm
+export PNPM_HOME="$HOME/.local/share/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME:"*) ;;
+  *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+
+# Android SDK — Windows host SDK via WSL mount + Linux-native cmdline-tools
+export ANDROID_SDK_ROOT="/mnt/c/Users/omars/AppData/Local/Android/Sdk"
+export ANDROID_HOME="$ANDROID_SDK_ROOT"
+export PATH="$ANDROID_SDK_ROOT/platform-tools:$PATH"
+[[ -d "$HOME/Android/Sdk/cmdline-tools/latest/bin" ]] \
+  && export PATH="$HOME/Android/Sdk/cmdline-tools/latest/bin:$PATH"
+
+# Maestro (mobile UI testing)
+[[ -d "$HOME/.maestro/bin" ]] && export PATH="$PATH:$HOME/.maestro/bin"
+
+# VS Code (Windows host)
+export PATH="$PATH:/mnt/c/Program Files/Microsoft VS Code/bin"
+
+# ─── 3. Shell settings ───────────────────────────────────────────────────────
+
+bind 'set show-all-if-ambiguous on'
+bind 'set completion-ignore-case on'
+stty -ixon 2>/dev/null          # prevent Ctrl-S from freezing the terminal
+
+# ─── 4. Aliases ──────────────────────────────────────────────────────────────
+
+# Navigation
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Better ls — eza > lsd > default
+if command -v eza >/dev/null; then
+  alias ls='eza --group-directories-first --icons -F'
+elif command -v lsd >/dev/null; then
+  alias ls='lsd'
+fi
+
+# Git
+alias g='git'
+alias lg='lazygit'
+
+# Containers — Docker with Podman fallback
+if command -v docker >/dev/null; then
+  alias d='docker'
+  alias dc='docker compose'
+elif command -v podman >/dev/null; then
+  alias d='podman'
+  alias dc='podman compose'
+fi
+
+# Infrastructure
+alias k='kubectl'
+alias kctx='kubectl config current-context'
+alias kns='kubectl config set-context --current --namespace'
+alias tf='terraform'
+
+# Android
+alias adb="$ANDROID_SDK_ROOT/platform-tools/adb.exe"
+
+# Misc
+alias please='sudo $(history -p !!)'
+alias hget='http --print=HBhb --download'
+alias claudef='claude --dangerously-skip-permissions'
+
+# Safety guards — confirm before destructive commands
+alias rm='rm -I'
+alias mv='mv -i'
+alias cp='cp -i'
+
+# ─── 5. Utility functions ────────────────────────────────────────────────────
+
+# Print the latest GitHub release download URL matching a pattern.
+#   Usage: gh_latest owner/repo <file-pattern>
+gh_latest() {
+  curl -s "https://api.github.com/repos/$1/releases/latest" \
+    | grep "browser_download_url" \
+    | grep "$2" | cut -d '"' -f 4
+}
+
+# Docker lifecycle shortcuts.
+docker-start() { sudo systemctl start docker && echo "Docker started"; }
+docker-stop()  { sudo systemctl stop docker && echo "Docker stopped"; }
+docker-nuke()  {
+  echo "This will remove ALL containers, images, volumes, and networks."
+  read -rp "Are you sure? [y/N] " confirm
+  [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; return 1; }
+  docker stop $(docker ps -aq) 2>/dev/null
+  docker system prune -af --volumes
+  echo "Docker nuked."
+}
+
+# Show directory sizes — dust with du fallback.
+dsize() { dust -d 1 "$@" 2>/dev/null || du -h -d 1 "$@"; }
+
+# ─── 6. fzf integration ──────────────────────────────────────────────────────
+
+if command -v fzf >/dev/null; then
+  export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border'
+
+  fzf-history-widget() {
+    local selected
+    selected=$(history | tac | fzf +s --tac | sed -E "s/ *[0-9]+\*? +//")
+    READLINE_LINE=$selected
+    READLINE_POINT=${#selected}
+  }
+  bind -x '"\C-r": "fzf-history-widget"'
+fi
+
+# ─── 7. update() — upgrade all package managers in one shot ──────────────────
+
+update() {
+  echo "==> apt"
+  sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
+
+  echo "==> snap"
+  sudo snap refresh
+
+  echo "==> brew"
+  brew update && brew upgrade && brew cleanup
+
+  echo "==> rustup & cargo"
+  rustup update
+  cargo install-update -a 2>/dev/null || true
+
+  echo "==> nvm (node)"
+  nvm install node --reinstall-packages-from=node && nvm cache clear
+
+  echo "==> npm"
+  npm install -g npm && npm update -g
+
+  echo "==> pnpm"
+  pnpm self-update && pnpm update -g
+
+  echo "==> pip"
+  pip3 install --upgrade pip 2>/dev/null || true
+
+  echo "==> gcloud"
+  gcloud components update --quiet 2>/dev/null \
+    || echo "       gcloud managed by apt — already updated above"
+
+  echo "==> Done!"
+}
+
+# ─── 8. install() — bootstrap a fresh Ubuntu/WSL from scratch ────────────────
+
+install() {
+  export DEBIAN_FRONTEND=noninteractive
+
+  echo "==> apt essentials"
+  sudo apt update && sudo apt install -y \
+    build-essential curl wget git unzip zip jq htop tree telnet \
+    software-properties-common apt-transport-https ca-certificates \
+    gnupg lsb-release python3 python3-pip python3-venv
+
+  echo "==> Homebrew"
+  if ! command -v brew >/dev/null; then
+    NONINTERACTIVE=1 /bin/bash -c \
+      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+  fi
+
+  echo "==> Brew packages"
+  brew install fzf eza dust httpie lazygit starship
+
+  echo "==> Rust (rustup)"
+  if ! command -v rustup >/dev/null; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    . "$HOME/.cargo/env"
+  fi
+
+  echo "==> NVM + Node"
+  if [[ ! -d "$HOME/.nvm" ]]; then
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+    export NVM_DIR="$HOME/.nvm"
+    . "$NVM_DIR/nvm.sh"
+  fi
+  nvm install node
+  nvm install --lts
+
+  echo "==> SDKMAN + Java (Liberica 25 LTS)"
+  if [[ ! -d "$HOME/.sdkman" ]]; then
+    curl -s "https://get.sdkman.io?rcupdate=false" | bash
+  fi
+  source "$HOME/.sdkman/bin/sdkman-init.sh"
+  sdk install java 25.0.2-librca <<< "Y"
+
+  echo "==> pnpm"
+  if ! command -v pnpm >/dev/null; then
+    curl -fsSL https://get.pnpm.io/install.sh | sh -
+  fi
+
+  echo "==> Docker"
+  if ! command -v docker >/dev/null; then
+    curl -fsSL https://get.docker.com | sh
+    sudo usermod -aG docker "$USER"
+  fi
+
+  echo "==> Podman"
+  if ! command -v podman >/dev/null; then
+    sudo apt install -y podman
+  fi
+
+  echo "==> Android SDK (cmdline-tools)"
+  if [[ ! -d "$HOME/Android/Sdk/cmdline-tools" ]]; then
+    local android_sdk="$HOME/Android/Sdk"
+    local cmdline_zip="commandlinetools-linux-latest.zip"
+    mkdir -p "$android_sdk/cmdline-tools"
+    curl -fsSL "https://dl.google.com/android/repository/${cmdline_zip}" \
+      -o "/tmp/${cmdline_zip}"
+    unzip -q "/tmp/${cmdline_zip}" -d "$android_sdk/cmdline-tools"
+    mv "$android_sdk/cmdline-tools/cmdline-tools" "$android_sdk/cmdline-tools/latest"
+    rm "/tmp/${cmdline_zip}"
+    export ANDROID_HOME="$android_sdk"
+    export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+    yes | sdkmanager --licenses >/dev/null 2>&1
+    sdkmanager "platform-tools" "build-tools;36.1.0" "platforms;android-36"
+  fi
+
+  echo "==> WSL utilities"
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    sudo apt install -y wslu
+  fi
+
+  echo "==> kubectl"
+  if ! command -v kubectl >/dev/null; then
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key \
+      | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg --yes
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /" \
+      | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    sudo apt update && sudo apt install -y kubectl
+  fi
+
+  echo "==> Terraform"
+  if ! command -v terraform >/dev/null; then
+    brew install hashicorp/tap/terraform
+  fi
+
+  echo "==> gcloud CLI"
+  if ! command -v gcloud >/dev/null; then
+    curl -fsSL https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz \
+      | tar -xz -C "$HOME"
+    "$HOME/google-cloud-sdk/install.sh" --quiet --path-update true
+  fi
+
+  echo "==> GitHub CLI"
+  if ! command -v gh >/dev/null; then
+    brew install gh
+  fi
+
+  echo "==> Oh My Bash"
+  if [[ ! -d "$HOME/.oh-my-bash" ]]; then
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohmybash/oh-my-bash/master/tools/install.sh)" \
+      --unattended
+  fi
+
+  echo "==> Claude Code"
+  if ! command -v claude >/dev/null; then
+    npm install -g @anthropic-ai/claude-code
+  fi
+
+  echo "==> All done! Restart your shell."
+}
+
+# ─── 9. doctor() — verify & auto-fix the dev environment ────────────────────
+
+doctor() {
+  local fix=false errors=0
+  [[ "$1" == "fix" ]] && fix=true
+
+  # --- output helpers ---
+  _ok()      { printf "  \033[32m✔\033[0m %s\n" "$*"; }
+  _fail()    { printf "  \033[31m✘\033[0m %s\n" "$*"; ((errors++)); }
+  _warn()    { printf "  \033[33m⚠\033[0m %s\n" "$*"; }
+  _fix()     { printf "    \033[33m→\033[0m %s\n" "$*"; }
+  _section() { printf "\n\033[1;36m%s\033[0m\n" "$*"; }
+
+  # --- check helpers ---
+
+  _doctor_check() {
+    local name="$1" cmd="$2" fix_cmd="$3" ver_cmd="$4"
+    if command -v "$cmd" >/dev/null 2>&1; then
+      local ver=""
+      [[ -n "$ver_cmd" ]] && ver=$(eval "$ver_cmd" 2>/dev/null)
+      _ok "$name${ver:+ ($ver)}"
+    else
+      _fail "$name — missing"
+      if $fix && [[ -n "$fix_cmd" ]]; then
+        _fix "fixing: $fix_cmd"
+        eval "$fix_cmd"
+      fi
+    fi
+  }
+
+  _doctor_check_dir() {
+    local name="$1" dir="$2" fix_cmd="$3"
+    if [[ -d "$dir" ]]; then
+      _ok "$name"
+    else
+      _fail "$name — $dir not found"
+      if $fix && [[ -n "$fix_cmd" ]]; then
+        _fix "fixing: $fix_cmd"
+        eval "$fix_cmd"
+      fi
+    fi
+  }
+
+  _doctor_check_env() {
+    local name="$1" var="$2"
+    if [[ -n "${!var}" ]]; then
+      _ok "$name (\$$var = ${!var})"
+    else
+      _fail "$name — \$$var not set"
+    fi
+  }
+
+  _doctor_check_ver() {
+    local name="$1" ver="$2" min="$3" fix_cmd="$4"
+    if [[ -z "$ver" ]]; then
+      _fail "$name — not installed"
+      if $fix && [[ -n "$fix_cmd" ]]; then
+        _fix "fixing: $fix_cmd"
+        eval "$fix_cmd"
+      fi
+      return
+    fi
+    local major
+    major=$(echo "$ver" | sed 's/^v//' | cut -d. -f1)
+    if [[ "$major" =~ ^[0-9]+$ ]] && (( major >= min )); then
+      _ok "$name ($ver)"
+    else
+      _fail "$name ($ver) — want >= $min"
+      if $fix && [[ -n "$fix_cmd" ]]; then
+        _fix "fixing: $fix_cmd"
+        eval "$fix_cmd"
+      fi
+    fi
+  }
+
+  _doctor_check_git() {
+    local key="$1" expected="$2"
+    local actual
+    actual=$(git config --global "$key" 2>/dev/null)
+    if [[ "$actual" == "$expected" ]]; then
+      _ok "$key = $actual"
+    else
+      if [[ -n "$actual" ]]; then
+        _fail "$key = $actual (want: $expected)"
+      else
+        _fail "$key — not set (want: $expected)"
+      fi
+      $fix && git config --global "$key" "$expected" && _fix "fixed: $key = $expected"
+    fi
+  }
+
+  # --- checks ---
+
+  # Cache sudo early so checks (UFW, etc.) don't interrupt mid-output
+  if ! sudo -n true 2>/dev/null; then
+    _warn "Some checks need sudo — enter password now to avoid interruptions"
+    sudo -v
+  fi
+
+  _section "System tools"
+  _doctor_check "apt"             apt      ""
+  _doctor_check "curl"            curl     "sudo apt install -y curl"
+  _doctor_check "git"             git      "sudo apt install -y git"                              "git --version | awk '{print \$3}'"
+  _doctor_check "jq"              jq       "sudo apt install -y jq"
+  _doctor_check "unzip"           unzip    "sudo apt install -y unzip"
+  _doctor_check "build-essential" gcc      "sudo apt install -y build-essential"
+  _doctor_check "python3"         python3  "sudo apt install -y python3 python3-pip python3-venv" "python3 --version | awk '{print \$2}'"
+  _doctor_check "pip3"            pip3     "sudo apt install -y python3-pip"
+  _doctor_check "wget"            wget     "sudo apt install -y wget"
+  _doctor_check "telnet"          telnet   "sudo apt install -y telnet"
+  _doctor_check "htop"            htop     "sudo apt install -y htop"
+  _doctor_check "tree"            tree     "sudo apt install -y tree"
+
+  _section "Package managers"
+  _doctor_check "Homebrew"      brew   'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"'
+  _doctor_check "npm"           npm    ""                                                         "npm --version"
+  _doctor_check "pnpm"          pnpm   "curl -fsSL https://get.pnpm.io/install.sh | sh -"        "pnpm --version"
+  _doctor_check "Rust (cargo)"  cargo  "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && . \"\$HOME/.cargo/env\""  "cargo --version | awk '{print \$2}'"
+  _doctor_check "rustup"        rustup ""
+  _doctor_check "snap"          snap   ""
+
+  _section "Runtimes"
+  _doctor_check_dir "NVM"    "$HOME/.nvm"    'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash'
+  _doctor_check_ver "Node"   "$(node -v 2>/dev/null)"                                            24  "nvm install --lts"
+  _doctor_check_dir "SDKMAN" "$HOME/.sdkman" 'curl -s "https://get.sdkman.io?rcupdate=false" | bash'
+  _doctor_check_ver "Java"   "$(java -version 2>&1 | head -1 | tr -d '"' | cut -d' ' -f3)"       25  'source "$HOME/.sdkman/bin/sdkman-init.sh" 2>/dev/null; sdk install java 25.0.2-librca <<< "Y"'
+
+  _section "Containers"
+  _doctor_check "Docker"  docker  "curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker \"\$USER\""  "docker --version | awk '{print \$3}' | tr -d ','"
+  _doctor_check "Podman"  podman  "sudo apt install -y podman"                                                     "podman --version | awk '{print \$3}'"
+  _doctor_check "kubectl" kubectl ""                                                                                "kubectl version --client 2>/dev/null | awk '/Client Version:/{print \$3}'"
+  _doctor_check "kubectx" kubectx "brew install kubectx"
+  _doctor_check "k9s"     k9s     "brew install k9s"                                                                                "kubectl version --client 2>/dev/null | awk '/Client Version:/{print \$3}'"
+
+  _section "Cloud & infra"
+  _doctor_check "Terraform"  terraform "brew install hashicorp/tap/terraform"  "terraform version 2>/dev/null | head -1 | awk '{print \$2}'"
+  _doctor_check "gcloud"     gcloud    ""                                      "gcloud version 2>/dev/null | head -1 | awk '{print \$4}'"
+  _doctor_check "GitHub CLI" gh        "brew install gh"                       "gh --version | head -1 | awk '{print \$3}'"
+
+  _section "CLI tools"
+  _doctor_check "fzf"         fzf      "brew install fzf"       "fzf --version | awk '{print \$1}'"
+  _doctor_check "eza"         eza      "brew install eza"       "eza --version 2>/dev/null | grep -m1 '^v' | awk '{print \$1}'"
+  _doctor_check "dust"        dust     "brew install dust"      "dust --version | awk '{print \$2}'"
+  _doctor_check "httpie"      http     "brew install httpie"    "http --version 2>/dev/null"
+  _doctor_check "lazygit"     lazygit  "brew install lazygit"   "lazygit --version 2>/dev/null | grep -o 'version=[^,]*' | head -1 | cut -d= -f2"
+  _doctor_check "starship"    starship "brew install starship"  "starship --version 2>/dev/null | head -1 | awk '{print \$2}'"
+  _doctor_check "Claude Code" claude   "npm install -g @anthropic-ai/claude-code"  "claude --version 2>/dev/null"
+
+  _section "Android SDK"
+  _doctor_check_env "ANDROID_HOME" ANDROID_HOME
+  _doctor_check_dir "cmdline-tools"  "$HOME/Android/Sdk/cmdline-tools/latest" ""
+  _doctor_check_dir "platform-tools" "$HOME/Android/Sdk/platform-tools" ""
+  _doctor_check "sdkmanager" sdkmanager ""
+
+  _section "Shell"
+  _doctor_check_dir "Oh My Bash" "$HOME/.oh-my-bash" \
+    'bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohmybash/oh-my-bash/master/tools/install.sh)" --unattended'
+
+  _section "WSL"
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+      _ok "Running inside WSL"
+    _doctor_check "wslu" wslview "sudo apt install -y wslu"
+
+    # Windows PATH not leaking into WSL
+    if grep -q 'appendWindowsPath.*false' /etc/wsl.conf 2>/dev/null; then
+        _ok "appendWindowsPath = false"
+    else
+        _fail "appendWindowsPath not disabled - Windows PATH pollutes WSL"
+      if $fix; then
+        sudo bash -c 'grep -q "\[interop\]" /etc/wsl.conf 2>/dev/null && sed -i "/\[interop\]/a appendWindowsPath = false" /etc/wsl.conf || echo -e "\n[interop]\nappendWindowsPath = false" >> /etc/wsl.conf'
+          _fix "fixed in /etc/wsl.conf - restart WSL: wsl --shutdown"
+      fi
+    fi
+
+    # VS Code Server (needed for 'code' command in WSL)
+    if [[ -d "$HOME/.vscode-server" ]]; then
+        _ok "VS Code Server installed"
+    else
+        _fail "VS Code Server - not installed"
+        _fix "Open VS Code on Windows, Ctrl+Shift+P > 'WSL: Connect to WSL'"
+    fi
+
+    # systemd enabled
+    if grep -q 'systemd.*true' /etc/wsl.conf 2>/dev/null; then
+        _ok "systemd enabled"
+    else
+        _fail "systemd not enabled in /etc/wsl.conf"
+    fi
+  else
+    echo "  [--] Not WSL (skipped)"
+  fi
+
+  _section "Security"
+
+  # SSH key
+  if [[ -f "$HOME/.ssh/id_ed25519" ]]; then
+      _ok "SSH key (Ed25519)"
+  elif [[ -f "$HOME/.ssh/id_rsa" ]]; then
+      _ok "SSH key (RSA - consider upgrading to Ed25519)"
+  else
+      _fail "SSH key - none found"
+    if $fix; then
+      ssh-keygen -t ed25519 -C "$USER@$(hostname)"
+    fi
+  fi
+
+  # SSH directory permissions
+  if [[ -d "$HOME/.ssh" ]]; then
+    local ssh_perms
+    ssh_perms=$(stat -c '%a' "$HOME/.ssh" 2>/dev/null)
+    if [[ "$ssh_perms" == "700" ]]; then
+        _ok "~/.ssh permissions ($ssh_perms)"
+    else
+        _fail "~/.ssh permissions ($ssh_perms) - want 700"
+      $fix && chmod 700 "$HOME/.ssh" &&   _fix "fixed"
+    fi
+  fi
+
+  # Git credential helper
+  if command -v git >/dev/null 2>&1; then
+    local cred_helper
+    cred_helper=$(git config --global credential.helper 2>/dev/null)
+    if [[ "$cred_helper" == "store" ]]; then
+        _fail "git credential.helper = store (plaintext passwords!)"
+      $fix && git config --global credential.helper cache &&   _fix "fixed: credential.helper = cache"
+    elif [[ -n "$cred_helper" ]]; then
+        _ok "git credential.helper = $cred_helper"
+    else
+        _fail "git credential.helper - not set"
+      $fix && git config --global credential.helper cache &&   _fix "fixed: credential.helper = cache"
+    fi
+  fi
+
+  # Firewall (UFW)
+  if command -v ufw >/dev/null 2>&1; then
+    local ufw_status
+    ufw_status=$(sudo ufw status 2>/dev/null | head -1)
+    if [[ "$ufw_status" == *"active"* ]]; then
+        _ok "UFW firewall active"
+    else
+        _fail "UFW firewall - inactive"
+      $fix && sudo ufw --force enable &&   _fix "fixed"
+    fi
+  else
+      _fail "UFW - not installed"
+    $fix && sudo apt install -y ufw && sudo ufw --force enable
+  fi
+
+  # Unattended upgrades
+  if dpkg -l unattended-upgrades >/dev/null 2>&1; then
+      _ok "unattended-upgrades installed"
+  else
+      _fail "unattended-upgrades - not installed"
+    $fix && sudo apt install -y unattended-upgrades &&   _fix "fixed"
+  fi
+
+  _section "PATH"
+
+  # Duplicates
+  local dup_count
+  dup_count=$(echo "$PATH" | tr ':' '\n' | sort | uniq -d | wc -l)
+  if (( dup_count > 0 )); then
+      _fail "$dup_count duplicate PATH entries"
+    if $fix; then
+      export PATH="$(echo "$PATH" | tr ':' '\n' | awk '!seen[$0]++' | paste -sd:)"
+        _fix "fixed: duplicates removed"
+    fi
+  else
+    local total_count
+    total_count=$(echo "$PATH" | tr ':' '\n' | wc -l)
+      _ok "No duplicate PATH entries ($total_count total)"
+  fi
+
+  # Stale entries
+  local stale_list stale_count
+  stale_list=$(echo "$PATH" | tr ':' '\n' | while read -r p; do [[ -n "$p" && ! -d "$p" ]] && echo "$p"; done)
+  if [[ -n "$stale_list" ]]; then
+    stale_count=$(echo "$stale_list" | wc -l)
+    _fail "$stale_count stale PATH entries"
+    echo "$stale_list" | while read -r p; do _fix "$p"; done
+    if $fix; then
+      export PATH="$(echo "$PATH" | tr ':' '\n' | while read -r p; do [[ -d "$p" ]] && echo "$p"; done | paste -sd:)"
+      _fix "fixed: stale entries removed"
+    fi
+  else
+    _ok "All PATH entries exist"
+  fi
+
+  # Java PATH vs JAVA_HOME consistency
+  if [[ -n "$JAVA_HOME" ]] && command -v java >/dev/null 2>&1; then
+    local java_path java_home_resolved
+    java_path=$(readlink -f "$(command -v java)" 2>/dev/null || command -v java)
+    java_home_resolved=$(readlink -f "$JAVA_HOME" 2>/dev/null || echo "$JAVA_HOME")
+    if [[ "$java_path" == "$java_home_resolved"* ]]; then
+        _ok "java in PATH matches JAVA_HOME"
+    else
+        _fail "java in PATH ($java_path) does not match JAVA_HOME ($java_home_resolved)"
+    fi
+  fi
+
+  _section "Configuration"
+
+  # Git settings
+  if command -v git >/dev/null 2>&1; then
+    local git_name git_email
+    git_name=$(git config --global user.name 2>/dev/null)
+    git_email=$(git config --global user.email 2>/dev/null)
+    if [[ -n "$git_name" && -n "$git_email" ]]; then
+        _ok "git identity ($git_name <$git_email>)"
+    else
+        _fail "git identity — user.name or user.email not set"
+      $fix &&   _fix "run: git config --global user.name 'Your Name' && git config --global user.email 'you@email.com'"
+    fi
+
+    # Pull strategy — always merge, never rebase
+    _doctor_check_git "pull.rebase"          "false"
+
+    # Line endings — LF everywhere, convert CRLF on commit (critical for WSL)
+    _doctor_check_git "core.autocrlf"        "input"
+    _doctor_check_git "core.eol"             "lf"
+
+    # Modern defaults
+    _doctor_check_git "init.defaultBranch"   "main"
+    _doctor_check_git "push.autoSetupRemote" "true"
+    _doctor_check_git "push.default"         "current"
+    _doctor_check_git "fetch.prune"          "true"
+
+    # Better diffs and merge conflicts
+    _doctor_check_git "diff.colorMoved"      "default"
+    _doctor_check_git "merge.conflictstyle"  "zdiff3"
+
+    # Editor
+    local git_editor
+    git_editor=$(git config --global core.editor 2>/dev/null)
+    if [[ -n "$git_editor" ]]; then
+        _ok "core.editor = $git_editor"
+    else
+        _fail "core.editor — not set"
+      $fix && git config --global core.editor "code --wait" &&   _fix "fixed: core.editor = code --wait"
+    fi
+  fi
+
+  # GitHub CLI auth
+  if command -v gh >/dev/null 2>&1; then
+    if gh auth status >/dev/null 2>&1; then
+        _ok "gh authenticated"
+    else
+        _fail "gh — not authenticated"
+      $fix &&   _fix "run: gh auth login"
+    fi
+  fi
+
+  # Docker daemon
+  if command -v docker >/dev/null 2>&1; then
+    if docker info >/dev/null 2>&1; then
+        _ok "Docker daemon reachable"
+    else
+        _fail "Docker daemon — not running"
+    fi
+  fi
+
+  # Docker group membership
+  if command -v docker >/dev/null 2>&1; then
+    if groups 2>/dev/null | grep -qw docker; then
+        _ok "docker group"
+    else
+        _fail "docker group — user not in docker group"
+      if $fix; then
+        sudo usermod -aG docker "$USER"
+          _fix "added — re-login required"
+      fi
+    fi
+  fi
+
+  # gcloud auth
+  if command -v gcloud >/dev/null 2>&1; then
+    local gcloud_acct
+    gcloud_acct=$(gcloud auth list 2>/dev/null | awk '/^\*/{print $2}')
+    if [[ -n "$gcloud_acct" ]]; then
+        _ok "gcloud auth ($gcloud_acct)"
+    else
+        _fail "gcloud — no active account"
+      $fix &&   _fix "run: gcloud auth login"
+    fi
+  fi
+
+  # NVM default
+  if type nvm >/dev/null 2>&1; then
+    local nvm_default
+    nvm_default=$(nvm alias default 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [[ -n "$nvm_default" ]]; then
+        _ok "nvm default ($nvm_default)"
+    else
+        _fail "nvm — no default version set"
+      $fix && nvm alias default node
+    fi
+  fi
+
+  # JAVA_HOME
+  if command -v java >/dev/null 2>&1; then
+    if [[ -n "$JAVA_HOME" && -d "$JAVA_HOME" ]]; then
+        _ok "JAVA_HOME set"
+    else
+        _fail "JAVA_HOME — not set or invalid"
+    fi
+  fi
+
+  # --- cleanup helpers & summary ---
+
+  unset -f _ok _fail _warn _fix _section _doctor_check _doctor_check_dir _doctor_check_env _doctor_check_ver _doctor_check_git
+
+  printf "\n"
+  if (( errors == 0 )); then
+    printf "\033[1;32m✔ All checks passed!\033[0m\n"
+  else
+    printf "\033[1;31m✘ %d issue(s) found.\033[0m\n" "$errors"
+    $fix || printf "  Run \033[1mdoctor fix\033[0m to auto-fix what's possible.\n"
+  fi
+}
