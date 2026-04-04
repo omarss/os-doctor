@@ -67,7 +67,23 @@ setopt AUTO_CD              # cd into directories by name alone
 setopt CORRECT              # offer spelling correction
 setopt SHARE_HISTORY        # share history across sessions
 setopt HIST_IGNORE_ALL_DUPS # no duplicate history entries
+setopt COMPLETE_IN_WORD     # complete from cursor position
+setopt ALWAYS_TO_END        # move cursor to end after completion
+setopt AUTO_MENU            # show menu on second TAB
+setopt LIST_PACKED          # compact completion list
 stty -ixon 2>/dev/null      # prevent Ctrl-S from freezing the terminal
+
+# Completion styling
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'  # case-insensitive
+zstyle ':completion:*' menu select                          # arrow-key menu
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"     # colored completions
+zstyle ':completion:*' group-name ''                        # group by category
+zstyle ':completion:*:descriptions' format '%F{cyan}-- %d --%f'
+
+# Tool-specific completions
+command -v kubectl >/dev/null && source <(kubectl completion zsh 2>/dev/null)
+command -v gh      >/dev/null && eval "$(gh completion -s zsh 2>/dev/null)"
+command -v docker  >/dev/null && source <(docker completion zsh 2>/dev/null)
 
 # ─── 4. Aliases ──────────────────────────────────────────────────────────────
 

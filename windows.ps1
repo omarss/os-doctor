@@ -153,7 +153,22 @@ function Clean-Path {
     Write-Host "PATH cleaned: $($clean.Count) entries"
 }
 
-# --- 5. fzf integration ------------------------------------------------------
+# --- 5. Autocomplete & PSReadLine --------------------------------------------
+
+# Tab completion: show menu, cycle with Tab/Shift-Tab
+Set-PSReadLineOption -EditMode Windows
+Set-PSReadLineOption -PredictionSource History
+Set-PSReadLineOption -PredictionViewStyle ListView
+Set-PSReadLineOption -ShowToolTips
+Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
+Set-PSReadLineKeyHandler -Key Shift+Tab -Function MenuComplete
+
+# kubectl completion
+if (Get-Command kubectl -ErrorAction SilentlyContinue) {
+    kubectl completion powershell 2>$null | Out-String | Invoke-Expression
+}
+
+# --- 6. fzf integration ------------------------------------------------------
 
 if (Get-Command fzf -ErrorAction SilentlyContinue) {
     $env:FZF_DEFAULT_OPTS = '--height 40% --layout=reverse --border'

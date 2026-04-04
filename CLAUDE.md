@@ -24,12 +24,18 @@ Each file follows the same section layout:
 
 1. Shell framework (Oh My Bash / Oh My Zsh / Starship)
 2. PATH & environment (guarded with existence checks, no duplicates)
-3. Shell settings & aliases
-4. Utility functions (gh_latest, dsize, docker-start/stop/nuke)
-5. fzf integration
-6. `update()` — per-platform package manager upgrades
-7. `install()` — full bootstrap with auto-elevation on Windows
-8. `doctor()` — comprehensive health checks
+3. Shell settings, autocomplete, and tool completions (kubectl, gh, docker)
+4. Aliases (navigation, containers, infra, safety guards: rm -I, mv -i, cp -i)
+5. Utility functions (gh_latest, dsize, docker-start/stop/nuke)
+6. fzf integration (Ctrl-R history search)
+7. `update()` — per-platform package manager upgrades
+8. `install()` — full bootstrap with auto-elevation on Windows
+9. `doctor()` — comprehensive health checks with colored output
+
+### Autocomplete features
+- **Bash**: menu-complete on TAB, colored stats, case-insensitive, Shift-TAB backward
+- **Zsh**: arrow-key menu select, case-insensitive, grouped by category, colored
+- **PowerShell**: PSReadLine predictive IntelliSense from history (ListView), menu-complete
 
 ## Doctor sections
 
@@ -54,6 +60,9 @@ Configuration (git settings, auth status, editor, pull.rebase=false, line ending
 - **Auto-elevation**: Windows `install` and `doctor fix` auto-elevate via UAC. Detects PS version (pwsh vs powershell).
 - **TLS fix**: Windows profile sets `[Net.ServicePointManager]::SecurityProtocol = Tls12` at the top for PS 5.1 compatibility.
 - **Unix polyfills on Windows**: Git usr/bin added to PATH, PS aliases for curl/wget removed, functions for touch/which/head/tail/grep/wc/df/ln/export/unset.
+- **Safety guards**: All platforms alias `rm`, `mv`, `cp` with confirmation flags to prevent accidental data loss.
+- **Docker shortcuts**: `docker-start`, `docker-stop`, `docker-nuke` (with confirmation) on all platforms. Platform-aware (systemctl on Linux, Docker Desktop on macOS/Windows).
+- **Scoop on Windows**: Uses `-RunAsAdmin` flag and `--ssl-no-revoke` for curl. Falls back to direct GitHub URL if get.scoop.sh is unreachable.
 
 ## Tool versions (pinned)
 

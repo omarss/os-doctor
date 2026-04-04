@@ -72,9 +72,22 @@ export PATH="$PATH:/mnt/c/Program Files/Microsoft VS Code/bin"
 
 # ─── 3. Shell settings ───────────────────────────────────────────────────────
 
-bind 'set show-all-if-ambiguous on'
-bind 'set completion-ignore-case on'
-stty -ixon 2>/dev/null          # prevent Ctrl-S from freezing the terminal
+bind 'set show-all-if-ambiguous on'       # show completions on first TAB
+bind 'set show-all-if-unmodified on'     # list immediately if no partial match
+bind 'set completion-ignore-case on'     # case-insensitive completion
+bind 'set colored-stats on'              # color completions by file type
+bind 'set colored-completion-prefix on'  # color the common prefix
+bind 'set mark-symlinked-directories on' # append / to symlinked dirs
+bind 'set menu-complete-display-prefix on'
+bind 'set skip-completed-text on'        # don't duplicate text after cursor
+bind 'TAB:menu-complete'                 # TAB cycles through completions
+bind '"\e[Z":menu-complete-backward'     # Shift-TAB cycles backward
+stty -ixon 2>/dev/null                   # prevent Ctrl-S from freezing the terminal
+
+# Tool-specific completions
+command -v kubectl >/dev/null && source <(kubectl completion bash 2>/dev/null)
+command -v gh      >/dev/null && eval "$(gh completion -s bash 2>/dev/null)"
+command -v docker  >/dev/null && source <(docker completion bash 2>/dev/null)
 
 # ─── 4. Aliases ──────────────────────────────────────────────────────────────
 
