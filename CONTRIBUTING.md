@@ -20,14 +20,16 @@ install.bat    Windows entry point
 ## Development workflow
 
 1. Fork and create a feature branch off `main`.
-2. Make your changes. Keep each PR focused on one concern.
-3. Run the lint checks for the files you touched:
+2. Install pre-commit hooks once per clone: `pip install pre-commit && pre-commit install`.
+3. Make your changes. Keep each PR focused on one concern.
+4. Run the lint checks. The easy path is `pre-commit run --all-files` — it runs shellcheck, bash parse-check, editorconfig-checker, actionlint, and non-ASCII checks over every file. Manual-stage hooks (zsh parse-check, PSScriptAnalyzer) run only when requested: `pre-commit run --hook-stage manual --all-files`.
+5. If you prefer raw commands:
    - `bash -n shells/bashrc`
    - `bash -n optimize/ubuntu.sh` (and any other shell script)
    - For PowerShell files, open in PS 5.1+ and verify they parse: `[System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw shells/windows.ps1), [ref]$null)`
-4. Verify your change by sourcing the profile and running `doctor` on a real machine of the target platform.
-5. Update `README.md` and `CLAUDE.md` if you added user-visible commands or changed conventions.
-6. Open a PR describing the motivation and the platforms you tested on.
+6. Verify your change by sourcing the profile and running `doctor` on a real machine of the target platform.
+7. Update `README.md` and `CLAUDE.md` if you added user-visible commands or changed conventions.
+8. Open a PR describing the motivation and the platforms you tested on.
 
 ## Cross-platform checklist for new tools
 

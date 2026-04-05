@@ -24,7 +24,7 @@ plugins=(git)
 [[ -f "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
 
 # Shared helpers
-devenv_path_prepend() {
+_devenv_path_prepend() {
   local dir="$1"
   [[ -d "$dir" ]] || return 0
   case ":$PATH:" in
@@ -33,7 +33,7 @@ devenv_path_prepend() {
   esac
 }
 
-devenv_path_append() {
+_devenv_path_append() {
   local dir="$1"
   [[ -d "$dir" ]] || return 0
   case ":$PATH:" in
@@ -42,12 +42,12 @@ devenv_path_append() {
   esac
 }
 
-devenv_skip() { echo "       [skip] $*"; }
+_devenv_skip() { echo "       [skip] $*"; }
 
 # ─── 2. PATH & environment ───────────────────────────────────────────────────
 
-devenv_path_prepend "$HOME/.local/bin"
-devenv_path_prepend "$HOME/bin"
+_devenv_path_prepend "$HOME/.local/bin"
+_devenv_path_prepend "$HOME/bin"
 
 # Homebrew — Apple Silicon (/opt/homebrew) with Intel (/usr/local) fallback
 if [[ -x /opt/homebrew/bin/brew ]]; then
@@ -69,16 +69,16 @@ export NVM_DIR="$HOME/.nvm"
 
 # pnpm
 export PNPM_HOME="$HOME/Library/pnpm"
-devenv_path_prepend "$PNPM_HOME"
+_devenv_path_prepend "$PNPM_HOME"
 
 # Android SDK — default Android Studio location on macOS
 export ANDROID_SDK_ROOT="$HOME/Library/Android/sdk"
 export ANDROID_HOME="$ANDROID_SDK_ROOT"
-devenv_path_prepend "$ANDROID_SDK_ROOT/platform-tools"
-devenv_path_prepend "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
+_devenv_path_prepend "$ANDROID_SDK_ROOT/platform-tools"
+_devenv_path_prepend "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin"
 
 # Maestro (mobile UI testing)
-devenv_path_append "$HOME/.maestro/bin"
+_devenv_path_append "$HOME/.maestro/bin"
 
 # ─── 3. Shell settings ───────────────────────────────────────────────────────
 
@@ -161,7 +161,33 @@ gh_latest() {
 }
 
 devenv_help() {
-  cat <<'EOF'
+  case "${1-}" in
+    doctor)
+      cat <<'EOF'
+Usage: doctor [fix|--fix]
+Check the current environment and report missing tools, unsafe settings,
+and configuration drift.
+
+Examples:
+  doctor
+  doctor --fix
+EOF
+      ;;
+    install)
+      cat <<'EOF'
+Usage: install
+Bootstrap this machine with the tools and settings defined in this profile.
+EOF
+      ;;
+    update)
+      cat <<'EOF'
+Usage: update
+Update installed package managers and developer toolchains.
+Missing package managers are skipped automatically.
+EOF
+      ;;
+    ""|all|-h|--help|help)
+      cat <<'EOF'
 Available commands:
   doctor [fix|--fix]  Check tools, PATH, security, and configuration
   install             Bootstrap this machine with the configured toolchain
@@ -172,7 +198,14 @@ Examples:
   doctor --fix
   install
   update
+  devenv-help doctor    # per-command detail
 EOF
+      ;;
+    *)
+      echo "devenv-help: unknown topic '$1' (try: doctor, install, update)" >&2
+      return 1
+      ;;
+  esac
 }
 alias devenv-help='devenv_help'
 
@@ -227,14 +260,14 @@ EOF
   if command -v brew >/dev/null 2>&1; then
     brew update && brew upgrade && brew cleanup
   else
-    devenv_skip "brew not installed"
+    _devenv_skip "brew not installed"
   fi
 
   echo "==> brew casks"
   if command -v brew >/dev/null 2>&1; then
     brew upgrade --cask
   else
-    devenv_skip "brew not installed"
+    _devenv_skip "brew not installed"
   fi
 
   echo "==> rustup & cargo"
@@ -244,35 +277,35 @@ EOF
       cargo install-update -a 2>/dev/null || true
     fi
   else
-    devenv_skip "rustup not installed"
+    _devenv_skip "rustup not installed"
   fi
 
   echo "==> nvm (node LTS)"
   if type nvm >/dev/null 2>&1; then
     nvm install --lts --reinstall-packages-from=node && nvm cache clear
   else
-    devenv_skip "nvm not installed"
+    _devenv_skip "nvm not installed"
   fi
 
   echo "==> npm"
   if command -v npm >/dev/null 2>&1; then
     npm install -g npm && npm update -g
   else
-    devenv_skip "npm not installed"
+    _devenv_skip "npm not installed"
   fi
 
   echo "==> pnpm"
   if command -v pnpm >/dev/null 2>&1; then
     pnpm self-update && pnpm update -g
   else
-    devenv_skip "pnpm not installed"
+    _devenv_skip "pnpm not installed"
   fi
 
   echo "==> gcloud"
   if command -v gcloud >/dev/null 2>&1; then
     gcloud components update --quiet
   else
-    devenv_skip "gcloud not installed"
+    _devenv_skip "gcloud not installed"
   fi
 
   echo "==> Done!"

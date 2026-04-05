@@ -19,9 +19,11 @@ Entry points: `install.sh` (Linux/macOS/WSL), `install.bat` (Windows).
 ## Key commands (all platforms)
 
 - `doctor` — run health checks (colored output with `✔`/`✘` symbols)
-- `doctor fix` — auto-fix what's possible (requests sudo/admin upfront)
+- `doctor --fix` (or `doctor fix` / `-f`) — auto-fix what's possible (requests sudo/admin upfront)
 - `install` — bootstrap a fresh machine from scratch
-- `update` — upgrade all package managers in one shot
+- `update` — upgrade installed package managers (missing ones are skipped)
+- `devenv-help [doctor|install|update]` — show the shared command reference, optionally scoped to one command
+- All commands accept `--help` / `-h` / `help`
 
 ## Architecture
 
@@ -62,7 +64,8 @@ Configuration (git settings, auth status, editor, pull.rebase=false, line ending
 - **No `readlink -f` on macOS**: Use `realpath` instead
 - **Line endings**: All platforms use `core.autocrlf=input, core.eol=lf` so commits have LF endings matching Linux/macOS.
 - **Container priority**: Linux: Docker > Podman. macOS: Socktainer > Podman > Docker. Windows: Podman > Docker.
-- **Auto-elevation**: Windows `install` and `doctor fix` auto-elevate via UAC. Detects PS version (pwsh vs powershell).
+- **Auto-elevation**: Windows `install` and `doctor --fix` auto-elevate via UAC. Detects PS version (pwsh vs powershell).
+- **PATH idempotency**: Bash/Zsh use `_devenv_path_prepend` / `_devenv_path_append` helpers (underscore-prefixed = internal), PowerShell uses `Add-PathEntry`. All skip nonexistent dirs and dedupe.
 - **TLS fix**: Windows profile sets `[Net.ServicePointManager]::SecurityProtocol = Tls12` at the top for PS 5.1 compatibility.
 - **Unix polyfills on Windows**: Git usr/bin added to PATH, PS aliases for curl/wget removed, functions for touch/which/head/tail/grep/wc/df/ln/export/unset.
 - **Safety guards**: All platforms alias `rm`, `mv`, `cp` with confirmation flags to prevent accidental data loss.

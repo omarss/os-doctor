@@ -215,7 +215,19 @@ Examples:
     }
 }
 
-function devenv-help { Show-DevEnvUsage @args }
+function devenv-help {
+    if ($args.Count -eq 0) { Show-DevEnvUsage; return }
+    if ($args.Count -gt 1) {
+        Write-Host "devenv-help: expected at most one topic" -ForegroundColor Red
+        $global:LASTEXITCODE = 1
+        return
+    }
+    $topic = $args[0]
+    if ($topic -in @('-h', '--help', 'help', 'all')) { Show-DevEnvUsage; return }
+    if ($topic -in @('doctor', 'install', 'update')) { Show-DevEnvUsage $topic; return }
+    Write-Host "devenv-help: unknown topic '$topic' (try: doctor, install, update)" -ForegroundColor Red
+    $global:LASTEXITCODE = 1
+}
 
 # Show directory sizes
 function dsize {
@@ -291,7 +303,9 @@ function update {
         Show-DevEnvUsage update
         return
     }
+    Write-Host "update: unknown argument '$($args[0])'" -ForegroundColor Red
     Show-DevEnvUsage update
+    $global:LASTEXITCODE = 1
 }
 
 function Update-DevEnv {
@@ -378,7 +392,9 @@ function install {
         Show-DevEnvUsage install
         return
     }
+    Write-Host "install: unknown argument '$($args[0])'" -ForegroundColor Red
     Show-DevEnvUsage install
+    $global:LASTEXITCODE = 1
 }
 
 function Install-DevEnv {
@@ -528,7 +544,9 @@ function doctor {
         Show-DevEnvUsage doctor
         return
     }
+    Write-Host "doctor: unknown argument '$($args[0])'" -ForegroundColor Red
     Show-DevEnvUsage doctor
+    $global:LASTEXITCODE = 1
 }
 
 function Test-DevEnv {

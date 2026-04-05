@@ -1,0 +1,119 @@
+# Run `pre-commit install` once to enable git hooks.
+# Run `pre-commit run --all-files` to lint the whole tree.
+# CI runs the same hooks in .github/workflows/lint.yml (pre-commit job).
+
+minimum_pre_commit_version: "3.5.0"
+
+default_language_version:
+  python: python3
+
+repos:
+  # -------- baseline hygiene --------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=no]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+        # .bashrc / zshrc sourced, not executed
+        exclude: ^shells/(bashrc|zshrc)$
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      - id: forbid-submodules
+
+  # -------- shell: shellcheck (strict) --------
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        name: shellcheck (bash, strict)
+        args:
+          - --shell=bash
+          - --severity=style
+          - --enable=all
+          - --external-sources
+          - --exclude=SC1090,SC1091,SC2034,SC2312
+        files: >-
+          ^(install\.sh|shells/bashrc|optimize/(ubuntu|macos|android)\.sh)$
+
+  # -------- shell: bash / zsh parse-check (local) --------
+  - repo: local
+    hooks:
+      - id: bash-parse
+        name: bash parse-check (bash -n)
+        language: system
+        entry: bash -n
+        files: >-
+          ^(install\.sh|shells/bashrc|optimize/(ubuntu|macos|android)\.sh)$
+        pass_filenames: true
+
+      - id: zsh-parse
+        name: zsh parse-check (zsh -n)
+        language: system
+        entry: zsh -n
+        files: ^shells/zshrc$
+        pass_filenames: true
+        # skipped locally on systems without zsh; CI enforces it
+        stages: [manual]
+
+  # -------- editorconfig --------
+  - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
+    rev: 3.2.1
+    hooks:
+      - id: editorconfig-checker
+        alias: ec
+        exclude: ^(LICENSE|NOTICE)$
+
+  # -------- GitHub Actions workflow lint --------
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+
+  # -------- PowerShell (local, requires pwsh) --------
+  - repo: local
+    hooks:
+      - id: psscriptanalyzer
+        name: PSScriptAnalyzer (strict)
+        language: system
+        entry: pwsh -NoProfile -Command
+        args:
+          - |
+            $ErrorActionPreference = 'Stop'
+            if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+              Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+            }
+            $exclude = @(
+              'PSAvoidUsingWriteHost',
+              'PSUseShouldProcessForStateChangingFunctions',
+              'PSAvoidUsingInvokeExpression',
+              'PSUseApprovedVerbs',
+              'PSAvoidGlobalVars'
+            )
+            $results = Invoke-ScriptAnalyzer -Path $args -Severity Warning,Error -ExcludeRule $exclude
+            if ($results) {
+              $results | Format-Table -AutoSize -Wrap
+              exit 1
+            }
+        files: \.ps1$
+        pass_filenames: true
+        # skipped locally on systems without pwsh; CI enforces it
+        stages: [manual]
+
+      - id: ps-ascii-only
+        name: reject non-ASCII in PS files (PS 5.1 safety)
+        language: system
+        entry: bash -c 'rc=0; for f in "$@"; do if LC_ALL=C grep -n "[^[:print:][:space:]]" "$f"; then echo "non-ASCII in $f"; rc=1; fi; done; exit $rc' --
+        files: \.ps1$
+        pass_filenames: true
