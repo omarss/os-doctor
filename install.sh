@@ -15,16 +15,46 @@ ok()    { printf "\033[32m  ✔ %s\033[0m\n" "$*"; }
 warn()  { printf "\033[33m  ⚠ %s\033[0m\n" "$*"; }
 fail()  { printf "\033[31m  ✘ %s\033[0m\n" "$*"; exit 1; }
 
+usage() {
+  cat <<'EOF'
+Usage: ./install.sh
+
+Detect the current OS, install the matching shell profile, and run the
+platform bootstrap command.
+EOF
+}
+
+backup_file() {
+  local target="$1"
+  [[ -f "$target" ]] || return 0
+
+  local stamp backup
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  backup="${target}.bak.${stamp}"
+  info "Backing up existing $(basename "$target") to $backup"
+  cp "$target" "$backup"
+}
+
+if [[ $# -gt 0 ]]; then
+  case "${1-}" in
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+fi
+
 deploy_bashrc() {
   local src="$REPO_DIR/shells/bashrc"
   local dest="$HOME/.bashrc"
 
   [[ -f "$src" ]] || fail "shells/bashrc not found in $REPO_DIR"
 
-  if [[ -f "$dest" ]]; then
-    info "Backing up existing ~/.bashrc to ~/.bashrc.bak"
-    cp "$dest" "$dest.bak"
-  fi
+  backup_file "$dest"
 
   info "Installing .bashrc to $dest"
   cp "$src" "$dest"
@@ -53,10 +83,7 @@ deploy_windows_profile() {
 
   mkdir -p "$ps_profile_dir"
 
-  if [[ -f "$ps_profile" ]]; then
-    info "Backing up existing Windows PS profile to .bak"
-    cp "$ps_profile" "$ps_profile.bak"
-  fi
+  backup_file "$ps_profile"
 
   info "Installing shells/windows.ps1 to $ps_profile"
   cp "$src" "$ps_profile"
@@ -66,9 +93,11 @@ deploy_windows_profile() {
   if [[ -f "$opt_src" ]]; then
     local win_desktop="$win_home/Desktop"
     if [[ -d "$win_desktop" ]]; then
+      backup_file "$win_desktop/Optimize-Windows.ps1"
       cp "$opt_src" "$win_desktop/Optimize-Windows.ps1"
       ok "Copied optimize/windows.ps1 to Windows Desktop"
     else
+      backup_file "$win_home/Optimize-Windows.ps1"
       cp "$opt_src" "$win_home/Optimize-Windows.ps1"
       ok "Copied optimize/windows.ps1 to Windows home"
     fi
@@ -115,10 +144,7 @@ case "$OS" in
 
     [[ -f "$SRC" ]] || fail "shells/zshrc not found in $REPO_DIR"
 
-    if [[ -f "$DEST" ]]; then
-      info "Backing up existing ~/.zshrc to ~/.zshrc.bak"
-      cp "$DEST" "$DEST.bak"
-    fi
+    backup_file "$DEST"
 
     info "Installing shells/zshrc to $DEST"
     cp "$SRC" "$DEST"

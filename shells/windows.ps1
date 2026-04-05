@@ -24,6 +24,31 @@ try {
     $script:DevEnvInteractiveConsole = $false
 }
 
+function Add-PathEntry {
+    param(
+        [string]$Path,
+        [ValidateSet('Prepend', 'Append')]
+        [string]$Position = 'Prepend'
+    )
+
+    if (-not $Path -or -not (Test-Path $Path)) {
+        return
+    }
+
+    $normalized = $Path.TrimEnd('\')
+    $entries = @($env:PATH -split ';' | Where-Object { $_ })
+    $existing = @($entries | ForEach-Object { $_.TrimEnd('\') })
+    if ($existing -contains $normalized) {
+        return
+    }
+
+    if ($Position -eq 'Append') {
+        $env:PATH = if ($env:PATH) { "$env:PATH;$normalized" } else { $normalized }
+    } else {
+        $env:PATH = if ($env:PATH) { "$normalized;$env:PATH" } else { $normalized }
+    }
+}
+
 # --- 1. Prompt ----------------------------------------------------------------
 
 # Starship prompt (if installed)
@@ -36,26 +61,18 @@ if (Get-Command starship -ErrorAction SilentlyContinue) {
 # Android SDK
 $env:ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
 $env:ANDROID_HOME     = $env:ANDROID_SDK_ROOT
-if (Test-Path "$env:ANDROID_SDK_ROOT\platform-tools") {
-    $env:PATH = "$env:ANDROID_SDK_ROOT\platform-tools;$env:PATH"
-}
-if (Test-Path "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin") {
-    $env:PATH = "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin;$env:PATH"
-}
+Add-PathEntry "$env:ANDROID_SDK_ROOT\platform-tools"
+Add-PathEntry "$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin"
 
 # Maestro
-if (Test-Path "$env:USERPROFILE\.maestro\bin") {
-    $env:PATH = "$env:USERPROFILE\.maestro\bin;$env:PATH"
-}
+Add-PathEntry "$env:USERPROFILE\.maestro\bin"
 
 # NVM for Windows
 $env:NVM_DIR = "$env:APPDATA\nvm"
 
 # pnpm
 $env:PNPM_HOME = "$env:LOCALAPPDATA\pnpm"
-if ($env:PATH -notlike "*$env:PNPM_HOME*") {
-    $env:PATH = "$env:PNPM_HOME;$env:PATH"
-}
+Add-PathEntry $env:PNPM_HOME
 
 # --- 3. Unix polyfills & aliases ---------------------------------------------
 
@@ -65,9 +82,7 @@ Remove-Item Alias:wget  -Force -ErrorAction SilentlyContinue  # PS aliases wget 
 
 # Add Git for Windows Unix tools to PATH (grep, sed, awk, find, xargs, etc.)
 $gitUsrBin = "${env:ProgramFiles}\Git\usr\bin"
-if ((Test-Path $gitUsrBin) -and ($env:PATH -notlike "*$gitUsrBin*")) {
-    $env:PATH = "$env:PATH;$gitUsrBin"
-}
+Add-PathEntry $gitUsrBin -Position Append
 
 # Common Unix commands missing from Windows
 function touch { param([string[]]$Paths) foreach ($p in $Paths) { if (Test-Path $p) { (Get-Item $p).LastWriteTime = Get-Date } else { New-Item -ItemType File -Path $p -Force | Out-Null } } }
@@ -107,6 +122,7 @@ if (Get-Command podman -ErrorAction SilentlyContinue) {
 # Infrastructure
 Set-Alias -Name k  -Value kubectl
 function kctx { kubectl config current-context }
+function kns { kubectl config set-context --current --namespace @args }
 Set-Alias -Name tf -Value terraform
 
 # Misc
@@ -146,6 +162,60 @@ function Get-DevEnvEntryScript {
     }
     return $PROFILE
 }
+
+function Write-Skip {
+    param([string]$Message)
+    Write-Host "       [skip] $Message" -ForegroundColor DarkGray
+}
+
+function Show-DevEnvUsage {
+    param(
+        [ValidateSet('all', 'doctor', 'install', 'update')]
+        [string]$Topic = 'all'
+    )
+
+    switch ($Topic) {
+        'doctor' {
+            @'
+Usage: doctor [fix|--fix]
+Check tools, PATH, security, and configuration.
+
+Examples:
+  doctor
+  doctor --fix
+'@.Trim() | Write-Host
+        }
+        'install' {
+            @'
+Usage: install
+Bootstrap this machine with the tools and settings defined in this profile.
+'@.Trim() | Write-Host
+        }
+        'update' {
+            @'
+Usage: update
+Update installed package managers and developer toolchains.
+Missing package managers are skipped automatically.
+'@.Trim() | Write-Host
+        }
+        default {
+            @'
+Available commands:
+  doctor [fix|--fix]  Check tools, PATH, security, and configuration
+  install             Bootstrap this machine with the configured toolchain
+  update              Update installed package managers and CLIs
+
+Examples:
+  doctor
+  doctor --fix
+  install
+  update
+'@.Trim() | Write-Host
+        }
+    }
+}
+
+function devenv-help { Show-DevEnvUsage @args }
 
 # Show directory sizes
 function dsize {
@@ -212,64 +282,104 @@ if ($script:DevEnvInteractiveConsole -and (Get-Command fzf -ErrorAction Silently
 # --- 6. Update-DevEnv - upgrade all package managers in one shot -------------
 
 # Alias to match Linux/macOS
-function update { Update-DevEnv }
+function update {
+    if ($args.Count -eq 0) {
+        Update-DevEnv
+        return
+    }
+    if ($args.Count -eq 1 -and $args[0] -in @('--help', '-h', 'help')) {
+        Show-DevEnvUsage update
+        return
+    }
+    Show-DevEnvUsage update
+}
 
 function Update-DevEnv {
     Write-Host "==> winget" -ForegroundColor Cyan
-    winget upgrade --all --accept-source-agreements --accept-package-agreements
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        winget upgrade --all --accept-source-agreements --accept-package-agreements
+    } else {
+        Write-Skip "winget not installed"
+    }
 
     Write-Host "==> choco" -ForegroundColor Cyan
     if (Get-Command choco -ErrorAction SilentlyContinue) {
         choco upgrade all -y
     } else {
-        Write-Host "       choco not installed - skipping"
+        Write-Skip "choco not installed"
     }
 
     Write-Host "==> scoop" -ForegroundColor Cyan
     if (Get-Command scoop -ErrorAction SilentlyContinue) {
         scoop update *
     } else {
-        Write-Host "       scoop not installed - skipping"
+        Write-Skip "scoop not installed"
     }
 
     Write-Host "==> rustup & cargo" -ForegroundColor Cyan
     if (Get-Command rustup -ErrorAction SilentlyContinue) {
         rustup update
-        cargo install-update -a 2>$null
+        if (Get-Command cargo -ErrorAction SilentlyContinue) {
+            cargo install-update -a 2>$null
+        }
+    } else {
+        Write-Skip "rustup not installed"
     }
 
     Write-Host "==> nvm (node LTS)" -ForegroundColor Cyan
     if (Get-Command nvm -ErrorAction SilentlyContinue) {
         nvm install lts
         nvm use lts
+    } else {
+        Write-Skip "nvm not installed"
     }
 
     Write-Host "==> npm" -ForegroundColor Cyan
     if (Get-Command npm -ErrorAction SilentlyContinue) {
         npm install -g npm
         npm update -g
+    } else {
+        Write-Skip "npm not installed"
     }
 
     Write-Host "==> pnpm" -ForegroundColor Cyan
     if (Get-Command pnpm -ErrorAction SilentlyContinue) {
         pnpm self-update
         pnpm update -g
+    } else {
+        Write-Skip "pnpm not installed"
     }
 
     Write-Host "==> gcloud" -ForegroundColor Cyan
     if (Get-Command gcloud -ErrorAction SilentlyContinue) {
         gcloud components update --quiet
+    } else {
+        Write-Skip "gcloud not installed"
     }
 
     Write-Host "==> WSL" -ForegroundColor Cyan
-    wsl --update
+    if (Get-Command wsl -ErrorAction SilentlyContinue) {
+        wsl --update
+    } else {
+        Write-Skip "wsl not installed"
+    }
 
     Write-Host "==> Done!" -ForegroundColor Green
 }
 
 # --- 7. Install-DevEnv - bootstrap a fresh Windows machine from scratch ------
 
-function install { Install-DevEnv }
+function install {
+    if ($args.Count -eq 0) {
+        Install-DevEnv
+        return
+    }
+    if ($args.Count -eq 1 -and $args[0] -in @('--help', '-h', 'help')) {
+        Show-DevEnvUsage install
+        return
+    }
+    Show-DevEnvUsage install
+}
 
 function Install-DevEnv {
     $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -405,7 +515,21 @@ function Install-DevEnv {
 # --- 8. Test-DevEnv - verify & auto-fix the dev environment (doctor) --------
 
 # Alias to match Linux/macOS: doctor / doctor fix
-function doctor { if ($args -contains 'fix') { Test-DevEnv -Fix } else { Test-DevEnv } }
+function doctor {
+    if ($args.Count -eq 0) {
+        Test-DevEnv
+        return
+    }
+    if ($args.Count -eq 1 -and $args[0] -in @('fix', '--fix', '-f')) {
+        Test-DevEnv -Fix
+        return
+    }
+    if ($args.Count -eq 1 -and $args[0] -in @('--help', '-h', 'help')) {
+        Show-DevEnvUsage doctor
+        return
+    }
+    Show-DevEnvUsage doctor
+}
 
 function Test-DevEnv {
     param([switch]$Fix)
