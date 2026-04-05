@@ -55,7 +55,7 @@ Configuration (git settings, auth status, editor, pull.rebase=false, line ending
 - **Git config checks**: `_doctor_check_git` / `Check-GitConfig` validates and auto-fixes
 - **PATH guards**: All PATH additions use `[[ -d ... ]]` or `Test-Path` guards
 - **No `readlink -f` on macOS**: Use `realpath` instead
-- **Line endings**: Linux/macOS use `core.autocrlf=input, core.eol=lf`. Windows uses `core.autocrlf=true, core.eol=native`.
+- **Line endings**: All platforms use `core.autocrlf=input, core.eol=lf` so commits have LF endings matching Linux/macOS.
 - **Container priority**: Linux: Docker > Podman. macOS: Socktainer > Podman > Docker. Windows: Podman > Docker.
 - **Auto-elevation**: Windows `install` and `doctor fix` auto-elevate via UAC. Detects PS version (pwsh vs powershell).
 - **TLS fix**: Windows profile sets `[Net.ServicePointManager]::SecurityProtocol = Tls12` at the top for PS 5.1 compatibility.

@@ -15,15 +15,6 @@
 # Ensure TLS 1.2 for all web requests (Windows PowerShell 5.1 defaults to old TLS)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# Track how this script was loaded so elevated relaunches can source the same file.
-$script:DevEnvScriptPath = if ($PSCommandPath) { $PSCommandPath } elseif ($MyInvocation.MyCommand.Path) { $MyInvocation.MyCommand.Path } else { $PROFILE }
-$script:DevEnvInteractiveConsole = $false
-try {
-    $script:DevEnvInteractiveConsole = $Host.Name -eq 'ConsoleHost' -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
-} catch {
-    $script:DevEnvInteractiveConsole = $false
-}
-
 # --- 1. Prompt ----------------------------------------------------------------
 
 # Starship prompt (if installed)
@@ -140,13 +131,6 @@ function Get-GHLatest {
     $release.assets | Where-Object { $_.name -like "*$Pattern*" } | Select-Object -ExpandProperty browser_download_url
 }
 
-function Get-DevEnvEntryScript {
-    if ($script:DevEnvScriptPath -and (Test-Path $script:DevEnvScriptPath)) {
-        return $script:DevEnvScriptPath
-    }
-    return $PROFILE
-}
-
 # Show directory sizes
 function dsize {
     if (Get-Command dust -ErrorAction SilentlyContinue) {
@@ -173,21 +157,14 @@ function Clean-Path {
 # --- 5. Autocomplete & PSReadLine --------------------------------------------
 
 # Tab completion: show menu, cycle with Tab/Shift-Tab
-if ($script:DevEnvInteractiveConsole -and (Get-Module -ListAvailable PSReadLine)) {
-    Import-Module PSReadLine -ErrorAction SilentlyContinue
-    try {
-        Set-PSReadLineOption -EditMode Windows
-        if ((Get-Module PSReadLine).Version -ge [version]'2.1.0') {
-            Set-PSReadLineOption -PredictionSource History
-            Set-PSReadLineOption -PredictionViewStyle ListView
-        }
-        Set-PSReadLineOption -ShowToolTips
-        Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
-        Set-PSReadLineKeyHandler -Key Shift+Tab -Function MenuComplete
-    } catch {
-        Write-Verbose "Skipping PSReadLine configuration in this host."
-    }
+Set-PSReadLineOption -EditMode Windows
+if ((Get-Module PSReadLine).Version -ge [version]'2.1.0') {
+    Set-PSReadLineOption -PredictionSource History
+    Set-PSReadLineOption -PredictionViewStyle ListView
 }
+Set-PSReadLineOption -ShowToolTips
+Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
+Set-PSReadLineKeyHandler -Key Shift+Tab -Function MenuComplete
 
 # kubectl completion
 if (Get-Command kubectl -ErrorAction SilentlyContinue) {
@@ -196,7 +173,7 @@ if (Get-Command kubectl -ErrorAction SilentlyContinue) {
 
 # --- 6. fzf integration ------------------------------------------------------
 
-if ($script:DevEnvInteractiveConsole -and (Get-Command fzf -ErrorAction SilentlyContinue)) {
+if (Get-Command fzf -ErrorAction SilentlyContinue) {
     $env:FZF_DEFAULT_OPTS = '--height 40% --layout=reverse --border'
 
     # Ctrl-R history search via fzf
@@ -274,14 +251,9 @@ function install { Install-DevEnv }
 function Install-DevEnv {
     $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) {
-        if (-not $script:DevEnvInteractiveConsole) {
-            Write-Host "Install-DevEnv requires an elevated interactive PowerShell session." -ForegroundColor Yellow
-            return
-        }
         Write-Host "Elevating to Administrator (UAC prompt)..." -ForegroundColor Yellow
         $psExe = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' }
-        $entryScript = (Get-DevEnvEntryScript).Replace("'", "''")
-        $argString = "-NoProfile -ExecutionPolicy RemoteSigned -Command ""& { . '$entryScript'; Install-DevEnv }"""
+        $argString = "-NoProfile -ExecutionPolicy RemoteSigned -Command ""& { . '${PROFILE}'; Install-DevEnv }"""
         Start-Process $psExe -Verb RunAs -ArgumentList $argString -Wait
         Write-Host "Admin install complete. Restart your terminal." -ForegroundColor Green
         return
@@ -414,14 +386,9 @@ function Test-DevEnv {
     if ($Fix) {
         $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         if (-not $isAdmin) {
-            if (-not $script:DevEnvInteractiveConsole) {
-                Write-Host "doctor fix requires an elevated interactive PowerShell session." -ForegroundColor Yellow
-                return
-            }
             Write-Host "Elevating to Administrator (UAC prompt)..." -ForegroundColor Yellow
             $psExe = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' }
-            $entryScript = (Get-DevEnvEntryScript).Replace("'", "''")
-            $argString = "-NoProfile -ExecutionPolicy RemoteSigned -Command ""& { . '$entryScript'; Test-DevEnv -Fix }"""
+            $argString = "-NoProfile -ExecutionPolicy RemoteSigned -Command ""& { . '${PROFILE}'; Test-DevEnv -Fix }"""
             Start-Process $psExe -Verb RunAs -ArgumentList $argString -Wait
             return
         }
@@ -544,7 +511,7 @@ function Test-DevEnv {
     _header "Package managers"
     Check-Command "npm"    npm    ""              'npm --version'
     Check-Command "pnpm"   pnpm   "npm install -g pnpm"  'pnpm --version'
-    Check-Command "cargo"  cargo  ""              'cargo --version 2>$null'
+    Check-Command "cargo"  cargo  ""              'cargo --version'
     Check-Command "rustup" rustup ""
 
     Write-Host ""
@@ -568,7 +535,7 @@ function Test-DevEnv {
     Write-Host ""
     _header "Cloud & infra"
     Check-Command "Terraform"  terraform "choco install -y terraform"   'terraform version | Select-Object -First 1'
-    Check-Command "gcloud"     gcloud    "choco install -y gcloudsdk"   'gcloud version 2>$null | Select-Object -First 1'
+    Check-Command "gcloud"     gcloud    "choco install -y gcloudsdk"   'gcloud version | Select-Object -First 1'
     Check-Command "GitHub CLI" gh        "choco install -y gh"          'gh --version | Select-Object -First 1'
 
     Write-Host ""
@@ -636,9 +603,9 @@ function Test-DevEnv {
 
     Write-Host ""
     _header "WSL"
-    $wslList = wsl --list --quiet 2>$null | ForEach-Object { ($_ -replace "`0", "").Trim() } | Where-Object { $_ }
+    $wslList = wsl --list --quiet 2>$null
     if ($wslList) {
-        $distros = $wslList -join ", "
+        $distros = ($wslList | Where-Object { $_.Trim() }) -join ", "
                 _ok "WSL installed ($distros)"
     } else {
                 _fail "WSL - no distributions installed"

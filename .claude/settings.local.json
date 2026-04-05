@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:/Users/omars/os-doctor/\"FEEDBACK*)",
+      "Bash(bash -n /c/Users/omars/os-doctor/.bashrc)",
+      "Bash(bash -n /c/Users/omars/os-doctor/macos.zshrc)",
+      "Bash(chmod +x:*)",
+      "Bash(bash -n /c/Users/omars/os-doctor/install.sh)",
+      "Bash(mkdir -p \"C:/Users/omars/OneDrive/Documents/PowerShell\")",
+      "Bash(cp \"C:/Users/omars/OneDrive/Documents/WindowsPowerShell/Microsoft.PowerShell_profile.ps1\" \"C:/Users/omars/OneDrive/Documents/PowerShell/Microsoft.PowerShell_profile.ps1\")",
+      "Bash(powershell.exe:*)"
+    ]
+  }
+}

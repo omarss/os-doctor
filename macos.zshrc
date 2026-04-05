@@ -148,7 +148,8 @@ docker-nuke()  {
   echo "This will remove ALL containers, images, volumes, and networks."
   read -rq "confirm?Are you sure? [y/N] " || { echo "\nAborted."; return 1; }
   echo
-  docker stop $(docker ps -aq) 2>/dev/null
+  local running; running=$(docker ps -aq 2>/dev/null)
+  [[ -n "$running" ]] && docker stop $running
   docker system prune -af --volumes
   echo "Docker nuked."
 }
@@ -176,17 +177,14 @@ update() {
   rustup update
   cargo install-update -a 2>/dev/null || true
 
-  echo "==> nvm (node)"
-  nvm install node --reinstall-packages-from=node && nvm cache clear
+  echo "==> nvm (node LTS)"
+  nvm install --lts --reinstall-packages-from=node && nvm cache clear
 
   echo "==> npm"
   npm install -g npm && npm update -g
 
   echo "==> pnpm"
   pnpm self-update && pnpm update -g
-
-  echo "==> pip"
-  pip3 install --upgrade pip 2>/dev/null || true
 
   echo "==> gcloud"
   gcloud components update --quiet
@@ -200,7 +198,7 @@ install() {
   echo "==> Xcode Command Line Tools"
   if ! xcode-select -p >/dev/null 2>&1; then
     xcode-select --install
-    echo "       "Press Enter once the Xcode CLT installer finishes..."
+    echo "       Press Enter once the Xcode CLT installer finishes..."
     read -r
   fi
 
@@ -232,7 +230,6 @@ install() {
     export NVM_DIR="$HOME/.nvm"
     . "$NVM_DIR/nvm.sh"
   fi
-  nvm install node
   nvm install --lts
 
   echo "==> SDKMAN + Java (Liberica 25 LTS)"
@@ -257,7 +254,7 @@ install() {
     yes | sdkmanager --licenses >/dev/null 2>&1
     sdkmanager "platform-tools" "build-tools;36.1.0" "platforms;android-36"
   else
-    echo "       "[skip] open Android Studio first to set up the SDK, then re-run"
+    echo "       [skip] open Android Studio first to set up the SDK, then re-run"
   fi
 
   echo "==> Maestro"
@@ -433,6 +430,7 @@ doctor() {
   _doctor_check "lazygit"     lazygit  "brew install lazygit"   "lazygit --version 2>/dev/null | grep -o 'version=[^,]*' | head -1 | cut -d= -f2"
   _doctor_check "starship"    starship "brew install starship"  "starship --version 2>/dev/null | head -1 | awk '{print \$2}'"
   _doctor_check "Claude Code" claude   "npm install -g @anthropic-ai/claude-code"  "claude --version 2>/dev/null"
+  _doctor_check "Maestro"     maestro  'curl -Ls "https://get.maestro.mobile.dev" | bash'  "maestro --version 2>/dev/null"
 
 
   _section "Android SDK"

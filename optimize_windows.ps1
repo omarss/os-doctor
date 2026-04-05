@@ -4,18 +4,28 @@
 
 .DESCRIPTION
     Applies curated settings in one shot. Creates a system restore point first.
-    Default: applies ALL categories non-interactively with the Strict profile.
+    Default: applies ALL categories non-interactively with the Moderate profile.
     Use --interactive (or -Interactive) to pick categories and toggle individual tweaks.
 
 .PARAMETER HardeningProfile
     Hardening profile to apply:
-      Strict   - Maximum hardening. Blocks NTLM, denies camera/mic by default,
-                 removes bloatware, disables WSH, restricts WSL interop. Best for
-                 security-focused workstations. (Default)
+      Strict   - Maximum hardening. Audits NTLM by default and can block it with
+                 -BlockNTLM, denies camera/mic by default, removes bloatware,
+                 disables WSH, restricts WSL interop. Best for security-focused
+                 workstations after compatibility testing.
       Moderate - Sensible defaults that follow Microsoft/CIS recommended practices
                  without breaking common workflows. Keeps camera/mic accessible,
                  uses audit mode for ASR/controlled folders, preserves background
-                 apps and visual effects. Good starting point for most users.
+                 apps and visual effects. Good starting point for most users. (Default)
+
+.PARAMETER BlockNTLM
+    In Strict profile, explicitly deny inbound and outbound NTLM traffic after
+    you have verified audit logs and compatibility. This can break local-account
+    RDP, workgroup authentication, and legacy services. Not enabled by default.
+
+.PARAMETER DisableRemoteDesktop
+    Explicitly disable the Remote Desktop listener and firewall rules. Not enabled
+    by default because it can lock out remote administration.
 
 .PARAMETER Interactive
     Launch interactive mode where you choose which categories/tweaks to apply.
@@ -32,17 +42,20 @@
     Skip creating a system restore point before making changes.
 
 .EXAMPLE
-    .\Optimize-Windows.ps1
-    .\Optimize-Windows.ps1 -HardeningProfile Moderate
-    .\Optimize-Windows.ps1 -HardeningProfile Strict -Interactive
-    .\Optimize-Windows.ps1 -DryRun
+    .\optimize_windows.ps1
+    .\optimize_windows.ps1 -HardeningProfile Strict -BlockNTLM
+    .\optimize_windows.ps1 -DisableRemoteDesktop
+    .\optimize_windows.ps1 -Interactive
+    .\optimize_windows.ps1 -DryRun
 #>
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [ValidateSet("Strict", "Moderate")]
-    [string]$HardeningProfile = "Strict",
+    [string]$HardeningProfile = "Moderate",
+    [switch]$BlockNTLM,
+    [switch]$DisableRemoteDesktop,
     [switch]$Interactive,
     [switch]$Clean,
     [switch]$DryRun,
@@ -55,8 +68,8 @@ param(
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-$ErrorActionPreference = 'SilentlyContinue'
-$script:LogFile = Join-Path $env:USERPROFILE "Optimize-Windows_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+$ErrorActionPreference = 'Continue'
+$script:LogFile = Join-Path $env:USERPROFILE "optimize_windows_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:ChangeCount = 0
 $script:SkipRestore = $SkipRestorePoint.IsPresent
 $script:IsStrict = ($HardeningProfile -eq "Strict")
@@ -105,6 +118,31 @@ function Set-RegistryValue {
             if ($Description) { Write-Log -Message $Description }
         } catch {
             Write-Log -Message "Failed: $Path\$Name - $_" -Level "ERROR"
+        }
+    }
+}
+
+function Remove-RegistryValue {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name,
+        [string]$Description = ""
+    )
+    if ($DryRun) {
+        Write-Log -Message "[DRY RUN] Would remove $Path\$Name" -Level "SKIP"
+        return
+    }
+    if (-not (Test-Path $Path)) { return }
+    if ($PSCmdlet.ShouldProcess("$Path\$Name", "Remove registry value")) {
+        try {
+            $prop = Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue
+            if ($null -eq $prop) { return }
+            Remove-ItemProperty -Path $Path -Name $Name -ErrorAction Stop
+            $script:ChangeCount++
+            if ($Description) { Write-Log -Message $Description }
+        } catch {
+            Write-Log -Message "Failed removing: $Path\$Name - $_" -Level "ERROR"
         }
     }
 }
@@ -386,8 +424,16 @@ function Invoke-PrivacyHardening {
         Disable-ServiceByName -Name "DiagTrack" -Description "Connected User Experiences and Telemetry"
         Disable-ServiceByName -Name "dmwappushservice" -Description "WAP Push Message Routing"
     }
-    # Telemetry level: 0 = Security (Enterprise only), 1 = Required/Basic
-    $telemetryLevel = if ($script:IsStrict) { 0 } else { 1 }
+    # Telemetry level: 0 = Security (Enterprise/Education/Server only), 1 = Required/Basic
+    $telemetryLevel = 1
+    if ($script:IsStrict) {
+        $edition = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
+        if ($edition -match 'Enterprise|Education|Server') {
+            $telemetryLevel = 0
+        } else {
+            Write-Log -Message "Telemetry level 0 only supported on Enterprise/Education/Server - using level 1 (Required)" -Level "WARN"
+        }
+    }
     Initialize-RegPath -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
     Set-RegistryValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "AllowTelemetry" -Value $telemetryLevel -Type "DWord" -Description "Set telemetry to level $telemetryLevel"
     Set-RegistryValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "LimitDiagnosticLogCollection" -Value 1 -Type "DWord" -Description "Limit diagnostic log collection"
@@ -594,12 +640,27 @@ function Invoke-SecurityHardening {
         Write-Log -Message "Firewall: enabled, inbound blocked, logging on"
     }
 
-    # --- Disable Remote Desktop ---
-    Write-Log -Message "Disabling Remote Desktop..."
-    Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 1 -Type "DWord" -Description "Deny RDP connections"
+    # --- Remote Desktop authentication / availability ---
+    Write-Log -Message "Hardening Remote Desktop authentication..."
     Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 1 -Type "DWord" -Description "Require NLA for RDP"
-    if (-not $DryRun) {
-        Disable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+    if ($DisableRemoteDesktop) {
+        Write-Log -Message "DisableRemoteDesktop requested - disabling Remote Desktop access..." -Level "WARN"
+        Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 1 -Type "DWord" -Description "Deny RDP connections"
+        if (-not $DryRun) {
+            Disable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+        }
+        Write-Log -Message "Remote Desktop disabled by explicit request" -Level "WARN"
+    } else {
+        try {
+            $rdpEnabled = ((Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -ErrorAction Stop).fDenyTSConnections -eq 0)
+            if ($rdpEnabled) {
+                Write-Log -Message "Remote Desktop left enabled; NLA required"
+            } else {
+                Write-Log -Message "Remote Desktop already disabled; leaving disabled"
+            }
+        } catch {
+            Write-Log -Message "Configured NLA for RDP and left current RDP availability unchanged"
+        }
     }
 
     # --- Disable SMBv1 ---
@@ -711,9 +772,13 @@ function Invoke-SecurityHardening {
     # Disable PowerShell v2 (downgrade attack vector)
     Write-Log -Message "Disabling PowerShell v2 engine (downgrade attack prevention)..."
     if (-not $DryRun) {
-        Disable-WindowsOptionalFeature -Online -FeatureName "MicrosoftWindowsPowerShellV2Root" -NoRestart -ErrorAction SilentlyContinue | Out-Null
-        Disable-WindowsOptionalFeature -Online -FeatureName "MicrosoftWindowsPowerShellV2" -NoRestart -ErrorAction SilentlyContinue | Out-Null
-        Write-Log -Message "Disabled PowerShell v2 engine"
+        try { Disable-WindowsOptionalFeature -Online -FeatureName "MicrosoftWindowsPowerShellV2Root" -NoRestart -ErrorAction Stop | Out-Null } catch {
+            Write-Log -Message "PS v2 Root feature not present (already removed in this Windows build)" -Level "Info"
+        }
+        try { Disable-WindowsOptionalFeature -Online -FeatureName "MicrosoftWindowsPowerShellV2" -NoRestart -ErrorAction Stop | Out-Null } catch {
+            Write-Log -Message "PS v2 feature not present (already removed in this Windows build)" -Level "Info"
+        }
+        Write-Log -Message "PowerShell v2 engine disabled or not present"
     }
 
     # --- System-Wide Exploit Protection (CIS / MSFT recommended) ---
@@ -801,14 +866,20 @@ function Invoke-SecurityHardening {
     # --- Restrict null sessions (both profiles) ---
     Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters" -Name "RestrictNullSessAccess" -Value 1 -Type "DWord" -Description "Restrict null session access to named pipes and shares"
 
-    # --- Restrict NTLM traffic (Strict: deny, Moderate: audit only) ---
+    # --- Restrict NTLM traffic (audit by default, deny only with explicit opt-in) ---
     Initialize-RegPath -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"
     Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "AuditReceivingNTLMTraffic" -Value 2 -Type "DWord" -Description "Audit all incoming NTLM"
-    if ($script:IsStrict) {
+    $shouldBlockNTLM = ($script:IsStrict -and $BlockNTLM)
+    if ($shouldBlockNTLM) {
         Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "RestrictReceivingNTLMTraffic" -Value 2 -Type "DWord" -Description "Deny all incoming NTLM traffic"
         Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "RestrictSendingNTLMTraffic" -Value 2 -Type "DWord" -Description "Deny all outgoing NTLM traffic"
     } else {
-        Write-Log -Message "NTLM traffic set to audit-only (Moderate profile)"
+        Remove-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "RestrictReceivingNTLMTraffic" -Description "Cleared incoming NTLM deny policy"
+        Remove-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0" -Name "RestrictSendingNTLMTraffic" -Description "Cleared outgoing NTLM deny policy"
+        if ($BlockNTLM -and -not $script:IsStrict) {
+            Write-Log -Message "Ignoring -BlockNTLM because NTLM blocking is only allowed with -HardeningProfile Strict" -Level "WARN"
+        }
+        Write-Log -Message "NTLM traffic left in audit-only mode; review dependencies before enabling -BlockNTLM"
     }
 
     # --- Speculative execution mitigations (both profiles) ---
@@ -844,7 +915,7 @@ function Invoke-DiskCleanup {
     param()
     Write-Log -Message "DISK CLEANUP" -Level "SECTION"
 
-    $freedBytes = [long]0
+    $script:freedBytes = [long]0
 
     # Helper to delete folder contents and track freed space
 function Remove-FolderContent {
@@ -896,8 +967,23 @@ function Remove-FolderContent {
         }
     }
 
-    # --- Thumbnail cache ---
-    Remove-FolderContent -Path "$env:LOCALAPPDATA\Microsoft\Windows\Explorer" -Label "Thumbnail cache"
+    # --- Thumbnail cache (only thumbcache files, not the entire Explorer directory) ---
+    $explorerDir = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
+    if (Test-Path $explorerDir) {
+        if (-not $DryRun) {
+            $thumbFiles = Get-ChildItem -Path $explorerDir -Filter "thumbcache*" -File -Force -ErrorAction SilentlyContinue
+            $thumbSize = ($thumbFiles | Measure-Object -Property Length -Sum).Sum
+            $thumbFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+            $script:freedBytes += $thumbSize
+            $thumbMB = [math]::Round(($thumbSize / 1MB), 1)
+            if ($thumbMB -gt 0) { Write-Log -Message "Cleaned Thumbnail cache ($thumbMB MB)" }
+        } else {
+            $thumbFiles = Get-ChildItem -Path $explorerDir -Filter "thumbcache*" -File -Force -ErrorAction SilentlyContinue
+            $thumbSize = ($thumbFiles | Measure-Object -Property Length -Sum).Sum
+            $thumbMB = [math]::Round(($thumbSize / 1MB), 1)
+            Write-Log -Message "[DRY RUN] Would clean Thumbnail cache ($thumbMB MB)" -Level "SKIP"
+        }
+    }
 
     # --- Windows Error Reports ---
     Remove-FolderContent -Path "$env:LOCALAPPDATA\Microsoft\Windows\WER" -Label "Windows Error Reports (user)"
@@ -943,12 +1029,21 @@ function Remove-FolderContent {
     $browserCaches = @(
         "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache\Cache_Data"
         "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache\Cache_Data"
-        "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles"
     )
     foreach ($cache in $browserCaches) {
         if (Test-Path $cache) {
-            $browserName = if ($cache -match 'Edge') { "Edge" } elseif ($cache -match 'Chrome') { "Chrome" } else { "Firefox" }
+            $browserName = if ($cache -match 'Edge') { "Edge" } else { "Chrome" }
             Remove-FolderContent -Path $cache -Label "$browserName cache"
+        }
+    }
+    # Firefox: enumerate profiles and only remove cache directories (not bookmarks, extensions, etc.)
+    $ffProfileRoot = "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles"
+    if (Test-Path $ffProfileRoot) {
+        Get-ChildItem -Path $ffProfileRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $ffCache = Join-Path $_.FullName "cache2"
+            if (Test-Path $ffCache) { Remove-FolderContent -Path $ffCache -Label "Firefox cache (cache2)" }
+            $ffStartup = Join-Path $_.FullName "startupCache"
+            if (Test-Path $ffStartup) { Remove-FolderContent -Path $ffStartup -Label "Firefox startupCache" }
         }
     }
 
@@ -1037,7 +1132,7 @@ function New-OptimizationRestorePoint {
     Write-Log -Message "Creating system restore point..."
     try {
         Enable-ComputerRestore -Drive "C:\" -ErrorAction SilentlyContinue
-        Checkpoint-Computer -Description "Pre-Optimize-Windows $(Get-Date -Format 'yyyy-MM-dd HH:mm')" -RestorePointType MODIFY_SETTINGS -ErrorAction Stop
+        Checkpoint-Computer -Description "Pre-optimize_windows $(Get-Date -Format 'yyyy-MM-dd HH:mm')" -RestorePointType MODIFY_SETTINGS -ErrorAction Stop
         Write-Log -Message "Restore point created successfully"
     } catch {
         Write-Log -Message "Could not create restore point (may be throttled by Windows): $_" -Level "WARN"
@@ -1052,17 +1147,30 @@ function Show-Summary {
     Write-Host "  OPTIMIZATION COMPLETE" -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
+    Write-Host "  Profile:          $HardeningProfile" -ForegroundColor Green
     Write-Host "  Changes applied:  $($script:ChangeCount)" -ForegroundColor Green
     Write-Host "  Log file:         $($script:LogFile)" -ForegroundColor Gray
     Write-Host ""
     Write-Host "  IMPORTANT:" -ForegroundColor Yellow
     Write-Host "  - Some changes require a REBOOT to take effect" -ForegroundColor Yellow
     Write-Host "    (Credential Guard, HVCI, GPU scheduling, power plan, SMBv1)" -ForegroundColor Yellow
-    Write-Host "  - Camera/Mic are set to deny-by-default. Grant per-app in" -ForegroundColor Yellow
-    Write-Host "    Settings > Privacy & security if needed." -ForegroundColor Yellow
-    Write-Host "  - Controlled Folder Access is ON. Add app exceptions in" -ForegroundColor Yellow
-    Write-Host "    Windows Security if apps can't write to protected folders." -ForegroundColor Yellow
-    Write-Host "  - DNS over HTTPS is forced. Ensure your DNS server supports DoH." -ForegroundColor Yellow
+    if ($script:IsStrict) {
+        Write-Host "  - Camera/Mic are set to deny-by-default. Grant per-app in" -ForegroundColor Yellow
+        Write-Host "    Settings > Privacy & security if needed." -ForegroundColor Yellow
+        Write-Host "  - Controlled Folder Access is ON. Add app exceptions in" -ForegroundColor Yellow
+        Write-Host "    Windows Security if apps can't write to protected folders." -ForegroundColor Yellow
+        Write-Host "  - DNS over HTTPS is forced. Ensure your DNS server supports DoH." -ForegroundColor Yellow
+    } else {
+        Write-Host "  - Controlled Folder Access is in AUDIT mode (logging only)." -ForegroundColor Yellow
+        Write-Host "  - DNS over HTTPS is set to automatic (used when available)." -ForegroundColor Yellow
+    }
+    if ($BlockNTLM -and $script:IsStrict) {
+        Write-Host "  - NTLM traffic is blocked. Expect breakage for local-account RDP," -ForegroundColor Yellow
+        Write-Host "    workgroup auth, and legacy services that still depend on NTLM." -ForegroundColor Yellow
+    }
+    if ($DisableRemoteDesktop) {
+        Write-Host "  - Remote Desktop was explicitly disabled." -ForegroundColor Yellow
+    }
     Write-Host ""
     $reboot = Read-Host "Reboot now? [y/N]"
     if ($reboot -match '^[Yy]') {
@@ -1081,6 +1189,8 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
     Write-Host "  Requesting UAC elevation..." -ForegroundColor Yellow
     # Rebuild bound parameters explicitly (UnboundArguments misses declared params like -Interactive)
     $passArgs = @()
+    if ($BlockNTLM)        { $passArgs += '-BlockNTLM' }
+    if ($DisableRemoteDesktop) { $passArgs += '-DisableRemoteDesktop' }
     if ($Interactive)      { $passArgs += '-Interactive' }
     if ($Clean)            { $passArgs += '-Clean' }
     if ($DryRun)           { $passArgs += '-DryRun' }
@@ -1132,7 +1242,7 @@ if ($Interactive) {
 } else {
     Write-Host "  Profile: $HardeningProfile" -ForegroundColor White
     Write-Host "  Applying ALL optimizations (performance + privacy + security)." -ForegroundColor White
-    Write-Host "  Use -Interactive for selective mode, -DryRun to preview, -HardeningProfile Moderate for less strict." -ForegroundColor DarkGray
+    Write-Host "  Use -Interactive for selective mode, -DryRun to preview, -BlockNTLM only after audit review." -ForegroundColor DarkGray
     Write-Host ""
 
     New-OptimizationRestorePoint

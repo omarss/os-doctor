@@ -28,7 +28,7 @@ completions=(git composer ssh)
 aliases=(general)
 plugins=(git bashmarks)
 
-source "$OSH"/oh-my-bash.sh
+[[ -f "$OSH/oh-my-bash.sh" ]] && source "$OSH/oh-my-bash.sh"
 
 # ─── 2. PATH & environment ───────────────────────────────────────────────────
 
@@ -151,7 +151,8 @@ docker-nuke()  {
   echo "This will remove ALL containers, images, volumes, and networks."
   read -rp "Are you sure? [y/N] " confirm
   [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; return 1; }
-  docker stop $(docker ps -aq) 2>/dev/null
+  local running; running=$(docker ps -aq 2>/dev/null)
+  [[ -n "$running" ]] && docker stop $running
   docker system prune -af --volumes
   echo "Docker nuked."
 }
@@ -189,17 +190,14 @@ update() {
   rustup update
   cargo install-update -a 2>/dev/null || true
 
-  echo "==> nvm (node)"
-  nvm install node --reinstall-packages-from=node && nvm cache clear
+  echo "==> nvm (node LTS)"
+  nvm install --lts --reinstall-packages-from=node && nvm cache clear
 
   echo "==> npm"
   npm install -g npm && npm update -g
 
   echo "==> pnpm"
   pnpm self-update && pnpm update -g
-
-  echo "==> pip"
-  pip3 install --upgrade pip 2>/dev/null || true
 
   echo "==> gcloud"
   gcloud components update --quiet 2>/dev/null \
@@ -216,7 +214,7 @@ install() {
   echo "==> apt essentials"
   sudo apt update && sudo apt install -y \
     build-essential curl wget git unzip zip jq htop tree telnet \
-    software-properties-common apt-transport-https ca-certificates \
+    software-properties-common ca-certificates \
     gnupg lsb-release python3 python3-pip python3-venv
 
   echo "==> Homebrew"
@@ -241,7 +239,6 @@ install() {
     export NVM_DIR="$HOME/.nvm"
     . "$NVM_DIR/nvm.sh"
   fi
-  nvm install node
   nvm install --lts
 
   echo "==> SDKMAN + Java (Liberica 25 LTS)"
@@ -295,6 +292,19 @@ install() {
     echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /" \
       | sudo tee /etc/apt/sources.list.d/kubernetes.list
     sudo apt update && sudo apt install -y kubectl
+  fi
+
+  echo "==> kubectx & k9s"
+  if ! command -v kubectx >/dev/null; then
+    brew install kubectx
+  fi
+  if ! command -v k9s >/dev/null; then
+    brew install k9s
+  fi
+
+  echo "==> Maestro"
+  if ! command -v maestro >/dev/null; then
+    curl -Ls "https://get.maestro.mobile.dev" | bash
   fi
 
   echo "==> Terraform"
@@ -460,7 +470,8 @@ doctor() {
   _doctor_check "Podman"  podman  "sudo apt install -y podman"                                                     "podman --version | awk '{print \$3}'"
   _doctor_check "kubectl" kubectl ""                                                                                "kubectl version --client 2>/dev/null | awk '/Client Version:/{print \$3}'"
   _doctor_check "kubectx" kubectx "brew install kubectx"
-  _doctor_check "k9s"     k9s     "brew install k9s"                                                                                "kubectl version --client 2>/dev/null | awk '/Client Version:/{print \$3}'"
+  _doctor_check "k9s"     k9s     "brew install k9s"    "k9s version 2>/dev/null | grep 'Version:' | awk '{print \$2}'"
+  _doctor_check "Maestro" maestro 'curl -Ls "https://get.maestro.mobile.dev" | bash'  "maestro --version 2>/dev/null"
 
   _section "Cloud & infra"
   _doctor_check "Terraform"  terraform "brew install hashicorp/tap/terraform"  "terraform version 2>/dev/null | head -1 | awk '{print \$2}'"
@@ -567,6 +578,9 @@ doctor() {
     ufw_status=$(sudo ufw status 2>/dev/null | head -1)
     if [[ "$ufw_status" == *"active"* ]]; then
         _ok "UFW firewall active"
+        if command -v docker >/dev/null 2>&1; then
+          _warn "Docker can bypass UFW rules for published ports — verify DOCKER-USER chain or use rootless Docker"
+        fi
     else
         _fail "UFW firewall - inactive"
       $fix && sudo ufw --force enable &&   _fix "fixed"
