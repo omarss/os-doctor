@@ -16,6 +16,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Shell files renamed without leading dots (`shells/bashrc`, `shells/zshrc`)
 - Line-ending git config on Windows now matches Linux/macOS (`core.autocrlf=input`, `core.eol=lf`)
 - Switched project license from MIT to Apache 2.0
+- Bumped `actions/checkout` from `@v4` to `@v6` (latest stable, v6.0.2)
+- Pinned `editorconfig-checker/action-editorconfig-checker` from `@main` to `@v2` (latest stable tag)
 
 ### Removed
 - Stray artifact files (`Backing`, `Detected`, `Running`, `Installing`, `dotfiles.zip`, `Documents/`)
