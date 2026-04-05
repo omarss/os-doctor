@@ -168,6 +168,38 @@ function Write-Skip {
     Write-Host "       [skip] $Message" -ForegroundColor DarkGray
 }
 
+# Add a Scoop bucket only if it doesn't already exist (idempotent).
+function Add-ScoopBucket {
+    param([Parameter(Mandatory)][string]$Name)
+    if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) { return }
+    $bucketDir = Join-Path $env:USERPROFILE "scoop\buckets\$Name"
+    if (Test-Path $bucketDir) { return }
+    scoop bucket add $Name | Out-Null
+}
+
+# Install Liberica JDK via Scoop, skipping if the current binary already
+# satisfies the minimum major version ($MinMajor). Handles PATH precedence
+# by nudging the Scoop shim to the front.
+function Install-LibericaJdk {
+    param([int]$MinMajor = 25)
+    if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+        choco install -y --no-progress liberica-jdk
+        return
+    }
+    Add-ScoopBucket java
+    $installed = scoop list liberica-jdk 2>$null | Out-String
+    if ($installed -match '(?m)liberica-jdk\s+(\d+)') {
+        $have = [int]$matches[1]
+        if ($have -ge $MinMajor) {
+            Write-Host "       liberica-jdk $have already installed (>= $MinMajor)" -ForegroundColor DarkGray
+            return
+        }
+        scoop update liberica-jdk | Out-Null
+    } else {
+        scoop install java/liberica-jdk | Out-Null
+    }
+}
+
 function Show-DevEnvUsage {
     param(
         [ValidateSet('all', 'doctor', 'install', 'update')]
@@ -432,14 +464,14 @@ function Install-DevEnv {
             Write-Host "       download failed - install manually in pwsh: irm get.scoop.sh | iex" -ForegroundColor Yellow
         }
     }
-    scoop bucket add extras
-    scoop bucket add java
+    Add-ScoopBucket extras
+    Add-ScoopBucket java
 
-    # Core tools via Chocolatey
+    # Core tools via Chocolatey (pip ships with python3 - don't install separately)
     Write-Host "==> Choco packages" -ForegroundColor Cyan
-    choco install -y `
+    choco install -y --no-progress `
         git curl jq unzip `
-        python3 pip `
+        python3 `
         docker-desktop podman-cli `
         kubernetes-cli terraform `
         gh fzf eza dust lazygit starship `
@@ -447,7 +479,11 @@ function Install-DevEnv {
 
     # httpie via pip (choco package is broken)
     Write-Host "==> httpie (pip)" -ForegroundColor Cyan
-    pip install --quiet httpie
+    if (Get-Command pip -ErrorAction SilentlyContinue) {
+        pip install --quiet --upgrade httpie
+    } else {
+        Write-Skip "pip not found (python3 install may need a shell restart)"
+    }
 
     # Rust
     Write-Host "==> Rust (rustup)" -ForegroundColor Cyan
@@ -460,15 +496,23 @@ function Install-DevEnv {
     # NVM for Windows + Node
     Write-Host "==> NVM for Windows + Node" -ForegroundColor Cyan
     if (-not (Get-Command nvm -ErrorAction SilentlyContinue)) {
-        choco install -y nvm
-        refreshenv
+        choco install -y --no-progress nvm
+        if (Get-Command refreshenv -ErrorAction SilentlyContinue) { refreshenv }
     }
-    nvm install lts
-    nvm use lts
+    if (Get-Command nvm -ErrorAction SilentlyContinue) {
+        try {
+            nvm install lts
+            nvm use lts
+        } catch {
+            Write-Skip "nvm install failed (transient network error?) - re-run 'nvm install lts' later"
+        }
+    } else {
+        Write-Skip "nvm not on PATH yet - open a new terminal and run 'nvm install lts'"
+    }
 
-    # SDKMAN equivalent - use scoop for Java
-    Write-Host "==> Java (Liberica 25 LTS via Scoop)" -ForegroundColor Cyan
-    if (Get-Command scoop -ErrorAction SilentlyContinue) { scoop bucket rm java; scoop bucket add java https://github.com/ScoopInstaller/Java.git; scoop install java/liberica-jdk } else { choco install -y liberica-jdk }
+    # Java via Scoop (Liberica LTS)
+    Write-Host "==> Java (Liberica LTS via Scoop)" -ForegroundColor Cyan
+    Install-LibericaJdk
 
     # pnpm
     Write-Host "==> pnpm" -ForegroundColor Cyan
@@ -513,10 +557,18 @@ function Install-DevEnv {
         "Microsoft-Windows-Subsystem-Linux"
     )
     foreach ($feat in $features) {
-        $state = (Get-WindowsOptionalFeature -Online -FeatureName $feat -ErrorAction SilentlyContinue).State
-        if ($state -ne "Enabled") {
+        $info = Get-WindowsOptionalFeature -Online -FeatureName $feat -ErrorAction SilentlyContinue
+        if (-not $info) {
+            Write-Skip "$feat not available on this Windows SKU"
+            continue
+        }
+        if ($info.State -ne "Enabled") {
             Write-Host "       enabling $feat..."
-            Enable-WindowsOptionalFeature -Online -FeatureName $feat -NoRestart -ErrorAction SilentlyContinue
+            try {
+                Enable-WindowsOptionalFeature -Online -FeatureName $feat -NoRestart -ErrorAction Stop | Out-Null
+            } catch {
+                Write-Skip "$feat could not be enabled: $($_.Exception.Message)"
+            }
         }
     }
 
@@ -680,7 +732,8 @@ function Test-DevEnv {
             choco install -y python3
         }
     }
-    Check-Command "pip"             pip     ""
+    # pip ships with python3 - no separate install path
+    Check-Command "pip"             pip     "choco install -y python3"
 
     Write-Host ""
     _header "Package managers"
@@ -694,12 +747,20 @@ function Test-DevEnv {
     $nodeVer = try { (node -v) } catch { "" }
     Check-Version "Node" $nodeVer 24 "nvm install lts"
 
+    # Prefer JAVA_HOME\bin\java.exe so the version check reflects the
+    # intended JDK even when PATH still points at an older install.
     $javaVer = ""
-    if (Get-Command java -ErrorAction SilentlyContinue) {
-        $javaOut = (java -version 2>&1) | Out-String
+    $javaExe = ""
+    if ($env:JAVA_HOME -and (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
+        $javaExe = "$env:JAVA_HOME\bin\java.exe"
+    } elseif (Get-Command java -ErrorAction SilentlyContinue) {
+        $javaExe = (Get-Command java).Source
+    }
+    if ($javaExe) {
+        $javaOut = (& $javaExe -version 2>&1) | Out-String
         if ($javaOut -match '"(\d+[\d.]*)') { $javaVer = $matches[1] }
     }
-    Check-Version "Java" $javaVer 25 "if (Get-Command scoop -ErrorAction SilentlyContinue) { scoop bucket rm java; scoop bucket add java https://github.com/ScoopInstaller/Java.git; scoop install java/liberica-jdk } else { choco install -y liberica-jdk }"
+    Check-Version "Java" $javaVer 25 "Install-LibericaJdk -MinMajor 25"
 
     Write-Host ""
     _header "Containers"
@@ -737,21 +798,26 @@ function Test-DevEnv {
     $pathEntries = $env:PATH -split ';' | Where-Object { $_ -ne '' }
     $uniqueEntries = $pathEntries | ForEach-Object { $_.TrimEnd('\') } | Select-Object -Unique
     $dupCount = $pathEntries.Count - $uniqueEntries.Count
+    $staleEntries = $pathEntries | Where-Object { -not (Test-Path $_) }
+    $needsClean = $false
     if ($dupCount -gt 0) {
                 _fail "$dupCount duplicate PATH entries"
-        if ($Fix) { Clean-Path;         _fixmsg "fixed" }
+        $needsClean = $true
     } else {
                 _ok "No duplicate PATH entries ($($pathEntries.Count) total)"
     }
 
-    # Stale entries (directories that don't exist)
-    $staleEntries = $pathEntries | Where-Object { -not (Test-Path $_) }
     if ($staleEntries.Count -gt 0) {
                 _fail "$($staleEntries.Count) stale PATH entries"
         foreach ($s in $staleEntries) { Write-Host "       $s" -ForegroundColor DarkGray }
-        if ($Fix) { Clean-Path;         _fixmsg "fixed: stale entries removed" }
+        $needsClean = $true
     } else {
                 _ok "All PATH entries exist"
+    }
+
+    if ($Fix -and $needsClean) {
+        Clean-Path
+                _fixmsg "fixed: duplicates and stale entries removed"
     }
 
     # Java PATH vs JAVA_HOME consistency
@@ -762,6 +828,14 @@ function Test-DevEnv {
                     _ok "java in PATH matches JAVA_HOME"
         } else {
                     _fail "java in PATH ($javaPath) does not match JAVA_HOME ($env:JAVA_HOME)"
+            if ($Fix) {
+                $javaHomeBin = "$javaHomeNorm\bin"
+                if (Test-Path $javaHomeBin) {
+                    Add-PathEntry $javaHomeBin -Position Prepend
+                            _fixmsg "prepended $javaHomeBin to PATH for this session"
+                            _fixmsg "persist: setx PATH `"$javaHomeBin;`$env:PATH`" (or edit via System Properties)"
+                }
+            }
         }
     }
 
@@ -793,14 +867,22 @@ function Test-DevEnv {
     Write-Host ""
     _header "Windows features"
     foreach ($feat in @("TelnetClient", "Microsoft-Hyper-V-All", "VirtualMachinePlatform", "Microsoft-Windows-Subsystem-Linux")) {
-        $state = try { (Get-WindowsOptionalFeature -Online -FeatureName $feat -ErrorAction SilentlyContinue).State } catch { "" }
-        if ($state -eq "Enabled") {
+        $info = try { Get-WindowsOptionalFeature -Online -FeatureName $feat -ErrorAction SilentlyContinue } catch { $null }
+        if (-not $info) {
+                    _warn "$feat - not available on this Windows SKU"
+            continue
+        }
+        if ($info.State -eq "Enabled") {
                     _ok "$feat"
         } else {
                     _fail "$feat - not enabled"
             if ($Fix) {
                         _fixmsg "fixing: Enable-WindowsOptionalFeature $feat"
-                Enable-WindowsOptionalFeature -Online -FeatureName $feat -NoRestart -ErrorAction SilentlyContinue
+                try {
+                    Enable-WindowsOptionalFeature -Online -FeatureName $feat -NoRestart -ErrorAction Stop | Out-Null
+                } catch {
+                            _fixmsg "could not enable: $($_.Exception.Message)"
+                }
             }
         }
     }
@@ -818,7 +900,10 @@ function Test-DevEnv {
         } else {
                     _fail "Windows Defender real-time protection - disabled"
         }
-        if ($defender.AntivirusSignatureAge -le 7) {
+        # 65535 is the sentinel Defender returns when it's disabled/inactive.
+        if ($defender.AntivirusSignatureAge -ge 65535 -or -not $defender.RealTimeProtectionEnabled) {
+                    _warn "Defender signatures - not reported (Defender disabled or inactive)"
+        } elseif ($defender.AntivirusSignatureAge -le 7) {
                     _ok "Defender signatures ($($defender.AntivirusSignatureAge) days old)"
         } else {
                     _fail "Defender signatures - $($defender.AntivirusSignatureAge) days old (update recommended)"

@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- Windows `install`: removed non-existent `pip` choco package (pip ships with `python3`)
+- Windows `install`: idempotent `Add-ScoopBucket` helper — no more "bucket already exists" warnings
+- Windows `install`: replaced the brittle one-liner Java install with `Install-LibericaJdk` — checks if the current install already satisfies the minimum major version and stops re-adding the scoop bucket
+- Windows `install` + `doctor`: Windows optional features now skip gracefully when the feature isn't available on the current SKU (e.g., `Microsoft-Hyper-V-All` on Home editions) instead of throwing a DISM error
+- Windows `doctor`: Defender signature age `65535` sentinel is now reported as a warning ("Defender disabled or inactive") instead of "65535 days old"
+- Windows `doctor`: PATH cleanup now runs once when both duplicates and stale entries are present, not twice
+- Windows `doctor`: Java version check now prefers `$env:JAVA_HOME\bin\java.exe` over the PATH-resolved `java`, so the version reflects the intended JDK even when an older install still sits ahead on PATH
+- Windows `doctor --fix`: JAVA_HOME mismatch now offers to prepend `$env:JAVA_HOME\bin` to the session PATH (with a `setx` command for persistence)
+- Windows `install`: `nvm install lts` is wrapped in try/catch so transient nodejs.org outages don't abort the whole bootstrap
+
 ### Added
 - Apache 2.0 `LICENSE` and `NOTICE` files
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `CHANGELOG.md`
