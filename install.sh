@@ -16,10 +16,10 @@ warn()  { printf "\033[33m  ⚠ %s\033[0m\n" "$*"; }
 fail()  { printf "\033[31m  ✘ %s\033[0m\n" "$*"; exit 1; }
 
 deploy_bashrc() {
-  local src="$REPO_DIR/.bashrc"
+  local src="$REPO_DIR/shells/bashrc"
   local dest="$HOME/.bashrc"
 
-  [[ -f "$src" ]] || fail ".bashrc not found in $REPO_DIR"
+  [[ -f "$src" ]] || fail "shells/bashrc not found in $REPO_DIR"
 
   if [[ -f "$dest" ]]; then
     info "Backing up existing ~/.bashrc to ~/.bashrc.bak"
@@ -33,10 +33,10 @@ deploy_bashrc() {
 
 deploy_windows_profile() {
   # Deploy windows.ps1 to the Windows host's PowerShell $PROFILE from WSL
-  local src="$REPO_DIR/windows.ps1"
-  local opt_src="$REPO_DIR/Optimize-Windows.ps1"
+  local src="$REPO_DIR/shells/windows.ps1"
+  local opt_src="$REPO_DIR/optimize/windows.ps1"
 
-  [[ -f "$src" ]] || { warn "windows.ps1 not found — skipping Windows profile"; return; }
+  [[ -f "$src" ]] || { warn "shells/windows.ps1 not found — skipping Windows profile"; return; }
 
   # Resolve the Windows user profile path via WSL interop
   local win_home
@@ -58,19 +58,19 @@ deploy_windows_profile() {
     cp "$ps_profile" "$ps_profile.bak"
   fi
 
-  info "Installing windows.ps1 to $ps_profile"
+  info "Installing shells/windows.ps1 to $ps_profile"
   cp "$src" "$ps_profile"
   ok "Installed Windows PowerShell profile"
 
-  # Also deploy Optimize-Windows.ps1 to the Windows desktop for easy access
+  # Also deploy optimize/windows.ps1 to the Windows desktop for easy access
   if [[ -f "$opt_src" ]]; then
     local win_desktop="$win_home/Desktop"
     if [[ -d "$win_desktop" ]]; then
       cp "$opt_src" "$win_desktop/Optimize-Windows.ps1"
-      ok "Copied Optimize-Windows.ps1 to Windows Desktop"
+      ok "Copied optimize/windows.ps1 to Windows Desktop"
     else
       cp "$opt_src" "$win_home/Optimize-Windows.ps1"
-      ok "Copied Optimize-Windows.ps1 to Windows home"
+      ok "Copied optimize/windows.ps1 to Windows home"
     fi
   fi
 }
@@ -110,17 +110,17 @@ case "$OS" in
   Darwin*)
     info "Detected macOS"
 
-    SRC="$REPO_DIR/macos.zshrc"
+    SRC="$REPO_DIR/shells/zshrc"
     DEST="$HOME/.zshrc"
 
-    [[ -f "$SRC" ]] || fail "macos.zshrc not found in $REPO_DIR"
+    [[ -f "$SRC" ]] || fail "shells/zshrc not found in $REPO_DIR"
 
     if [[ -f "$DEST" ]]; then
       info "Backing up existing ~/.zshrc to ~/.zshrc.bak"
       cp "$DEST" "$DEST.bak"
     fi
 
-    info "Installing macos.zshrc to $DEST"
+    info "Installing shells/zshrc to $DEST"
     cp "$SRC" "$DEST"
     ok "Installed .zshrc"
 

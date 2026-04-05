@@ -5,14 +5,14 @@
 Validate all three dotfiles for syntax, consistency, and common pitfalls.
 
 ### Steps
-1. Run `bash -n .bashrc` and report errors
-2. Run `bash -n macos.zshrc` — note that zsh-specific syntax (like `${(P)var}`) will fail in bash; only flag actual logic errors
-3. Lint `windows.ps1` via `PSParser.Tokenize()` using the Windows PowerShell binary at `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`
+1. Run `bash -n shells/bashrc` and report errors
+2. Run `bash -n shells/zshrc` — note that zsh-specific syntax (like `${(P)var}`) will fail in bash; only flag actual logic errors
+3. Lint `shells/windows.ps1` via `PSParser.Tokenize()` using the Windows PowerShell binary at `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`
 4. Check for double error counting: any `((errors++))` or `$script:errors++` on the line immediately after a `_fail` call is a bug — `_fail` already increments
 5. Check for `_ok`, `_fail`, `_fix`, `_section` called outside `doctor()` — they are only defined inside it
-6. Check for `readlink -f` in `macos.zshrc` — must be `realpath` on macOS
+6. Check for `readlink -f` in `shells/zshrc` — must be `realpath` on macOS
 7. Check that `unset -f` at the end of doctor cleans up ALL helper functions
-8. Verify no non-ASCII characters in `windows.ps1` (em dashes, box drawing, smart quotes break PS 5.1)
+8. Verify no non-ASCII characters in `shells/windows.ps1` (em dashes, box drawing, smart quotes break PS 5.1)
 
 ## add-tool
 
@@ -26,9 +26,9 @@ Add a new tool to all three dotfiles consistently.
 - `ver_cmd`: optional version extraction command (e.g., `k9s version --short`)
 
 ### Steps
-1. Add `_doctor_check` line to the CLI tools section in `.bashrc` with the install and version commands
-2. Add matching `_doctor_check` line to `macos.zshrc`
-3. Add matching `Check-Command` line to `windows.ps1`
+1. Add `_doctor_check` line to the CLI tools section in `shells/bashrc` with the install and version commands
+2. Add matching `_doctor_check` line to `shells/zshrc`
+3. Add matching `Check-Command` line to `shells/windows.ps1`
 4. If the tool needs a brew/choco install in `install()`, add it there too
 5. Run the lint agent to validate
 
@@ -44,9 +44,9 @@ Add a new security check to all three doctor commands.
 - `fix_cmd`: optional fix command per platform
 
 ### Steps
-1. Add the check to the Security section in `.bashrc` using `_ok`/`_fail` helpers
-2. Add matching check to `macos.zshrc` using `_ok`/`_fail` helpers
-3. Add matching check to `windows.ps1` using `_ok`/`_fail` helpers
+1. Add the check to the Security section in `shells/bashrc` using `_ok`/`_fail` helpers
+2. Add matching check to `shells/zshrc` using `_ok`/`_fail` helpers
+3. Add matching check to `shells/windows.ps1` using `_ok`/`_fail` helpers
 4. Ensure `_fail` is used (not manual `((errors++))`)
 5. Run the lint agent to validate
 

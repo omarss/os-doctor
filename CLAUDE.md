@@ -6,10 +6,15 @@ Cross-platform dev environment bootstrap, health checker, and hardening toolkit.
 
 | File | Platform | Shell | Deployed to |
 |------|----------|-------|-------------|
-| `.bashrc` | WSL / Ubuntu | bash | `~/.bashrc` |
-| `macos.zshrc` | macOS | zsh | `~/.zshrc` |
-| `windows.ps1` | Windows | PowerShell 5.1+ / 7+ | `$PROFILE` |
-| `Optimize-Windows.ps1` | Windows | PowerShell | Standalone script |
+| `shells/bashrc` | WSL / Ubuntu | bash | `~/.bashrc` |
+| `shells/zshrc` | macOS | zsh | `~/.zshrc` |
+| `shells/windows.ps1` | Windows | PowerShell 5.1+ / 7+ | `$PROFILE` |
+| `optimize/windows.ps1` | Windows | PowerShell | Standalone script |
+| `optimize/ubuntu.sh` | Ubuntu / WSL | bash | Standalone script |
+| `optimize/macos.sh` | macOS | bash | Standalone script |
+| `optimize/android.sh` | Android (adb) | bash | Standalone script |
+
+Entry points: `install.sh` (Linux/macOS/WSL), `install.bat` (Windows).
 
 ## Key commands (all platforms)
 
@@ -74,9 +79,9 @@ Configuration (git settings, auth status, editor, pull.rebase=false, line ending
 ## Testing changes
 
 1. Edit the file
-2. For bash: `source ~/.bashrc && doctor`
-3. For Windows: restart PowerShell, run `doctor`
-4. Verify no syntax errors: `bash -n .bashrc` or PS `PSParser.Tokenize()`
+2. For bash: `cp shells/bashrc ~/.bashrc && source ~/.bashrc && doctor`
+3. For Windows: `Copy-Item shells/windows.ps1 $PROFILE`, restart PowerShell, run `doctor`
+4. Verify no syntax errors: `bash -n shells/bashrc` or PS `PSParser.Tokenize()`
 5. Check for double error counting after `_fail` calls
 6. Check that `_ok`/`_fail`/`_fix` are not used outside `doctor()` (they're local)
 

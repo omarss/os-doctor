@@ -5,12 +5,14 @@ Cross-platform dev environment bootstrap, health checker, and security hardening
 ## Quick Start
 
 ```bash
-# Linux / macOS — copy the right file to your shell profile
-cp .bashrc ~/.bashrc        # WSL / Ubuntu
-cp macos.zshrc ~/.zshrc     # macOS
+# One-shot bootstrap — detects your OS and deploys the right profile
+./install.sh            # Linux, macOS, or WSL (also deploys the Windows profile from WSL)
+install.bat             # Windows (cmd / Explorer double-click)
 
-# Windows — copy to your PowerShell profile
-Copy-Item windows.ps1 $PROFILE
+# Or copy manually:
+cp shells/bashrc ~/.bashrc        # WSL / Ubuntu
+cp shells/zshrc  ~/.zshrc         # macOS
+Copy-Item shells/windows.ps1 $PROFILE   # Windows PowerShell
 
 # Then in any shell:
 doctor          # check everything
@@ -19,24 +21,34 @@ install         # bootstrap a fresh machine
 update          # upgrade all package managers
 ```
 
+## Repo Layout
+
+```
+shells/        bashrc, zshrc, windows.ps1  — deployed to your user profile
+optimize/      ubuntu.sh, macos.sh, android.sh, windows.ps1  — standalone hardeners
+install.sh     POSIX bootstrap entry point (Linux, macOS, WSL)
+install.bat    Windows bootstrap entry point
+.github/       CI workflows, issue/PR templates
+```
+
 ## What's Included
 
 ### Shell Profiles
 
 | File | Platform | Shell |
 |------|----------|-------|
-| `.bashrc` | WSL / Ubuntu | bash + Oh My Bash |
-| `macos.zshrc` | macOS | zsh + Oh My Zsh |
-| `windows.ps1` | Windows | PowerShell 5.1+ / 7+ |
+| `shells/bashrc` | WSL / Ubuntu | bash + Oh My Bash |
+| `shells/zshrc` | macOS | zsh + Oh My Zsh |
+| `shells/windows.ps1` | Windows | PowerShell 5.1+ / 7+ |
 
 ### Standalone Optimizers
 
 | File | Platform | What it does |
 |------|----------|--------------|
-| `optimize_ubuntu.sh` | Ubuntu / WSL | Performance tuning, privacy cleanup, security hardening, cache cleanup |
-| `optimize_macos.sh` | macOS | Finder/Dock tuning, privacy defaults, firewall/update hardening, cache cleanup |
-| `optimize_android.sh` | Android via adb | Device-side tuning, privacy/security settings, cache trim |
-| `optimize_windows.ps1` | Windows 11 | Performance, privacy, security hardening, disk cleanup |
+| `optimize/ubuntu.sh` | Ubuntu / WSL | Performance tuning, privacy cleanup, security hardening, cache cleanup |
+| `optimize/macos.sh` | macOS | Finder/Dock tuning, privacy defaults, firewall/update hardening, cache cleanup |
+| `optimize/android.sh` | Android via adb | Device-side tuning, privacy/security settings, cache trim |
+| `optimize/windows.ps1` | Windows 11 | Performance, privacy, security hardening, disk cleanup |
 
 ### Commands (all platforms)
 
@@ -110,103 +122,107 @@ Platform-specific checks: WSL config (appendWindowsPath, systemd, VS Code Server
 | Android build-tools | 36.1.0 |
 | Android platforms | android-36 |
 
-## optimize_windows.ps1
+## optimize/windows.ps1
 
 Standalone Windows 11 hardening script. Separate from the shell profiles.
 
 ```powershell
 # Recommended for most users
-.\optimize_windows.ps1
+.\optimize\windows.ps1
 
 # Full hardening after compatibility review
-.\optimize_windows.ps1 -HardeningProfile Strict -BlockNTLM
+.\optimize\windows.ps1 -HardeningProfile Strict -BlockNTLM
 
 # Disable RDP explicitly
-.\optimize_windows.ps1 -DisableRemoteDesktop
+.\optimize\windows.ps1 -DisableRemoteDesktop
 
 # Preview without changes
-.\optimize_windows.ps1 -DryRun
+.\optimize\windows.ps1 -DryRun
 
 # Interactive mode
-.\optimize_windows.ps1 -Interactive
+.\optimize\windows.ps1 -Interactive
 
 # Disk cleanup only
-.\optimize_windows.ps1 -Clean
+.\optimize\windows.ps1 -Clean
 ```
 
 Creates a system restore point before changes. See the script header for full documentation.
 
 Covers: Defender hardening, firewall, Credential Guard, HVCI, SMB signing, NTLM auditing, ASR rules, telemetry, bloatware removal, DNS over HTTPS, exploit protection, audit policies, and more. Strict NTLM blocking now requires explicit `-BlockNTLM`, and Remote Desktop remains available unless `-DisableRemoteDesktop` is passed. Based on CIS Windows 11 Enterprise Benchmark.
 
-## optimize_ubuntu.sh
+## optimize/ubuntu.sh
 
 Standalone Ubuntu and WSL optimization script with the same high-level workflow as the Windows version.
 
 ```bash
 # Full optimization with the safer default profile
-sudo ./optimize_ubuntu.sh
+sudo ./optimize/ubuntu.sh
 
 # Stronger hardening
-sudo ./optimize_ubuntu.sh --profile strict
+sudo ./optimize/ubuntu.sh --profile strict
 
 # Preview only
-sudo ./optimize_ubuntu.sh --dry-run
+sudo ./optimize/ubuntu.sh --dry-run
 
 # Cleanup only
-sudo ./optimize_ubuntu.sh --clean
+sudo ./optimize/ubuntu.sh --clean
 
 # Choose categories interactively
-sudo ./optimize_ubuntu.sh --interactive
+sudo ./optimize/ubuntu.sh --interactive
 ```
 
 Covers: sysctl tuning, journald limits, unattended-upgrades, UFW on native Ubuntu, SSH hardening when safe, privacy cleanup (apport, motd-news, popularity-contest), and developer cache cleanup. Detects WSL and skips Linux-native actions that do not make sense there.
 
-## optimize_macos.sh
+## optimize/macos.sh
 
 Standalone macOS optimization script for developer workstations.
 
 ```bash
 # Full optimization with the safer default profile
-sudo ./optimize_macos.sh
+sudo ./optimize/macos.sh
 
 # Stronger hardening
-sudo ./optimize_macos.sh --profile strict
+sudo ./optimize/macos.sh --profile strict
 
 # Preview only
-sudo ./optimize_macos.sh --dry-run
+sudo ./optimize/macos.sh --dry-run
 
 # Cleanup only
-sudo ./optimize_macos.sh --clean
+sudo ./optimize/macos.sh --clean
 
 # Choose categories interactively
-sudo ./optimize_macos.sh --interactive
+sudo ./optimize/macos.sh --interactive
 ```
 
 Covers: Dock and Finder animation tuning, privacy defaults, firewall and Gatekeeper enablement, automatic update settings, remote access shutdown, password-after-sleep enforcement, and cleanup of common developer caches such as Xcode DerivedData and Homebrew leftovers.
 
-## optimize_android.sh
+## optimize/android.sh
 
 Standalone Android optimizer that runs from your workstation through adb, with no on-device script deployment required.
 
 ```bash
 # Target the only connected device
-./optimize_android.sh
+./optimize/android.sh
 
 # Target a specific device or emulator
-./optimize_android.sh --serial emulator-5554
+./optimize/android.sh --serial emulator-5554
 
 # Stronger settings
-./optimize_android.sh --profile strict
+./optimize/android.sh --profile strict
 
 # Preview only
-./optimize_android.sh --dry-run
+./optimize/android.sh --dry-run
 
 # Cleanup only
-./optimize_android.sh --clean
+./optimize/android.sh --clean
 ```
 
 Covers: animation scale tuning, always-available scan shutdown where supported, package verification for adb installs, automatic time/time zone, and maintenance commands such as cache trimming and dex optimization. OEM support varies, so unsupported keys are logged as warnings instead of aborting the run.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, the cross-platform parity checklist, and common pitfalls to avoid. Security issues should be reported privately — see [SECURITY.md](SECURITY.md).
+
 ## License
 
-MIT
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.

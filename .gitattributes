@@ -1,0 +1,38 @@
+# Default: normalize to LF in the repo, check out as-is
+* text=auto eol=lf
+
+# Shell and config files — always LF
+*.sh       text eol=lf
+*.bash     text eol=lf
+*.zsh      text eol=lf
+bashrc     text eol=lf
+zshrc      text eol=lf
+.bashrc    text eol=lf
+.zshrc     text eol=lf
+*.md       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.json     text eol=lf
+*.toml     text eol=lf
+LICENSE    text eol=lf
+NOTICE     text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.editorconfig  text eol=lf
+
+# Windows-native files — CRLF
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.ico binary
+
+# Linguist hints
+shells/*       linguist-language=Shell
+optimize/*.sh  linguist-language=Shell

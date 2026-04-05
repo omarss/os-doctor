@@ -1,7 +1,26 @@
+# Build / packaging artifacts
 dotfiles.zip
+*.zip
+
+# Editor / OS noise
 *.tmp
 *.bak
 *.swp
 *~
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Logs
+*.log
+
+# Local overrides
+.env
+.env.local
+*.local
