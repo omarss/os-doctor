@@ -30,10 +30,31 @@ plugins=(git bashmarks)
 
 [[ -f "$OSH/oh-my-bash.sh" ]] && source "$OSH/oh-my-bash.sh"
 
+# Shared helpers
+_devenv_path_prepend() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+  case ":$PATH:" in
+    *":$dir:"*) ;;
+    *) export PATH="$dir${PATH:+:$PATH}" ;;
+  esac
+}
+
+_devenv_path_append() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+  case ":$PATH:" in
+    *":$dir:"*) ;;
+    *) export PATH="${PATH:+$PATH:}$dir" ;;
+  esac
+}
+
+_devenv_skip() { echo "       [skip] $*"; }
+
 # ─── 2. PATH & environment ───────────────────────────────────────────────────
 
-[[ -d "$HOME/.local/bin" ]] && export PATH="$HOME/.local/bin:$PATH"
-[[ -d "$HOME/bin" ]]       && export PATH="$HOME/bin:$PATH"
+_devenv_path_prepend "$HOME/.local/bin"
+_devenv_path_prepend "$HOME/bin"
 
 # Homebrew
 [[ -x /home/linuxbrew/.linuxbrew/bin/brew ]] \
@@ -52,23 +73,19 @@ export NVM_DIR="$HOME/.nvm"
 
 # pnpm
 export PNPM_HOME="$HOME/.local/share/pnpm"
-case ":$PATH:" in
-  *":$PNPM_HOME:"*) ;;
-  *) export PATH="$PNPM_HOME:$PATH" ;;
-esac
+_devenv_path_prepend "$PNPM_HOME"
 
 # Android SDK — Windows host SDK via WSL mount + Linux-native cmdline-tools
 export ANDROID_SDK_ROOT="/mnt/c/Users/omars/AppData/Local/Android/Sdk"
 export ANDROID_HOME="$ANDROID_SDK_ROOT"
-export PATH="$ANDROID_SDK_ROOT/platform-tools:$PATH"
-[[ -d "$HOME/Android/Sdk/cmdline-tools/latest/bin" ]] \
-  && export PATH="$HOME/Android/Sdk/cmdline-tools/latest/bin:$PATH"
+_devenv_path_prepend "$ANDROID_SDK_ROOT/platform-tools"
+_devenv_path_prepend "$HOME/Android/Sdk/cmdline-tools/latest/bin"
 
 # Maestro (mobile UI testing)
-[[ -d "$HOME/.maestro/bin" ]] && export PATH="$PATH:$HOME/.maestro/bin"
+_devenv_path_append "$HOME/.maestro/bin"
 
 # VS Code (Windows host)
-export PATH="$PATH:/mnt/c/Program Files/Microsoft VS Code/bin"
+_devenv_path_append "/mnt/c/Program Files/Microsoft VS Code/bin"
 
 # ─── 3. Shell settings ───────────────────────────────────────────────────────
 
@@ -144,6 +161,55 @@ gh_latest() {
     | grep "$2" | cut -d '"' -f 4
 }
 
+devenv_help() {
+  case "${1-}" in
+    doctor)
+      cat <<'EOF'
+Usage: doctor [fix|--fix]
+Check the current environment and report missing tools, unsafe settings,
+and configuration drift.
+
+Examples:
+  doctor
+  doctor --fix
+EOF
+      ;;
+    install)
+      cat <<'EOF'
+Usage: install
+Bootstrap this machine with the tools and settings defined in this profile.
+EOF
+      ;;
+    update)
+      cat <<'EOF'
+Usage: update
+Update installed package managers and developer toolchains.
+Missing package managers are skipped automatically.
+EOF
+      ;;
+    ""|all|-h|--help|help)
+      cat <<'EOF'
+Available commands:
+  doctor [fix|--fix]  Check tools, PATH, security, and configuration
+  install             Bootstrap this machine with the configured toolchain
+  update              Update installed package managers and CLIs
+
+Examples:
+  doctor
+  doctor --fix
+  install
+  update
+  devenv-help doctor    # per-command detail
+EOF
+      ;;
+    *)
+      echo "devenv-help: unknown topic '$1' (try: doctor, install, update)" >&2
+      return 1
+      ;;
+  esac
+}
+alias devenv-help='devenv_help'
+
 # Docker lifecycle shortcuts.
 docker-start() { sudo systemctl start docker && echo "Docker started"; }
 docker-stop()  { sudo systemctl stop docker && echo "Docker stopped"; }
@@ -177,31 +243,86 @@ fi
 # ─── 7. update() — upgrade all package managers in one shot ──────────────────
 
 update() {
+  if [[ $# -gt 1 ]]; then
+    echo "Usage: update"
+    return 1
+  fi
+  case "${1-}" in
+    "")
+      ;;
+    -h|--help|help)
+      cat <<'EOF'
+Usage: update
+Update installed package managers and developer toolchains.
+Missing package managers are skipped automatically.
+EOF
+      return 0
+      ;;
+    *)
+      echo "Usage: update"
+      return 1
+      ;;
+  esac
+
   echo "==> apt"
-  sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
+  if command -v apt >/dev/null 2>&1; then
+    sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
+  else
+    _devenv_skip "apt not installed"
+  fi
 
   echo "==> snap"
-  sudo snap refresh
+  if command -v snap >/dev/null 2>&1; then
+    sudo snap refresh
+  else
+    _devenv_skip "snap not installed"
+  fi
 
   echo "==> brew"
-  brew update && brew upgrade && brew cleanup
+  if command -v brew >/dev/null 2>&1; then
+    brew update && brew upgrade && brew cleanup
+  else
+    _devenv_skip "brew not installed"
+  fi
 
   echo "==> rustup & cargo"
-  rustup update
-  cargo install-update -a 2>/dev/null || true
+  if command -v rustup >/dev/null 2>&1; then
+    rustup update
+    if command -v cargo >/dev/null 2>&1; then
+      cargo install-update -a 2>/dev/null || true
+    fi
+  else
+    _devenv_skip "rustup not installed"
+  fi
 
   echo "==> nvm (node LTS)"
-  nvm install --lts --reinstall-packages-from=node && nvm cache clear
+  if type nvm >/dev/null 2>&1; then
+    nvm install --lts --reinstall-packages-from=node && nvm cache clear
+  else
+    _devenv_skip "nvm not installed"
+  fi
 
   echo "==> npm"
-  npm install -g npm && npm update -g
+  if command -v npm >/dev/null 2>&1; then
+    npm install -g npm && npm update -g
+  else
+    _devenv_skip "npm not installed"
+  fi
 
   echo "==> pnpm"
-  pnpm self-update && pnpm update -g
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm self-update && pnpm update -g
+  else
+    _devenv_skip "pnpm not installed"
+  fi
 
   echo "==> gcloud"
-  gcloud components update --quiet 2>/dev/null \
-    || echo "       gcloud managed by apt — already updated above"
+  if command -v gcloud >/dev/null 2>&1; then
+    gcloud components update --quiet 2>/dev/null \
+      || echo "       gcloud managed by apt — already updated above"
+  else
+    _devenv_skip "gcloud not installed"
+  fi
 
   echo "==> Done!"
 }
@@ -209,6 +330,26 @@ update() {
 # ─── 8. install() — bootstrap a fresh Ubuntu/WSL from scratch ────────────────
 
 install() {
+  if [[ $# -gt 1 ]]; then
+    echo "Usage: install"
+    return 1
+  fi
+  case "${1-}" in
+    "")
+      ;;
+    -h|--help|help)
+      cat <<'EOF'
+Usage: install
+Bootstrap this machine with the tools and settings defined in this profile.
+EOF
+      return 0
+      ;;
+    *)
+      echo "Usage: install"
+      return 1
+      ;;
+  esac
+
   export DEBIAN_FRONTEND=noninteractive
 
   echo "==> apt essentials"
@@ -342,7 +483,29 @@ install() {
 
 doctor() {
   local fix=false errors=0
-  [[ "$1" == "fix" ]] && fix=true
+  if [[ $# -gt 1 ]]; then
+    echo "Usage: doctor [fix|--fix]"
+    return 1
+  fi
+  case "${1-}" in
+    "")
+      ;;
+    fix|--fix|-f)
+      fix=true
+      ;;
+    -h|--help|help)
+      cat <<'EOF'
+Usage: doctor [fix|--fix]
+Check the current environment and report missing tools, unsafe settings,
+and configuration drift.
+EOF
+      return 0
+      ;;
+    *)
+      echo "Usage: doctor [fix|--fix]"
+      return 1
+      ;;
+  esac
 
   # --- output helpers ---
   _ok()      { printf "  \033[32m✔\033[0m %s\n" "$*"; }

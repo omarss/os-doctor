@@ -5,9 +5,17 @@ REM Usage: run install.bat from the repo directory (double-click or from cmd).
 
 setlocal
 
+if /I "%~1"=="--help" goto :usage
+if /I "%~1"=="help" goto :usage
+if "%~1"=="/?" goto :usage
+if not "%~1"=="" goto :usage_error
+
 set "REPO_DIR=%~dp0"
 set "SRC=%REPO_DIR%shells\windows.ps1"
 set "OPT_SRC=%REPO_DIR%optimize\windows.ps1"
+set "OPT_DEST=%USERPROFILE%\Optimize-Windows.ps1"
+
+for /f "delims=" %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "STAMP=%%T"
 
 echo ==^> Detected Windows
 
@@ -24,8 +32,8 @@ for /f "delims=" %%P in ('powershell -NoProfile -Command "echo $PROFILE"') do se
 
 REM Back up existing profile
 if exist "%PS_PROFILE%" (
-    echo ==^> Backing up existing profile to %PS_PROFILE%.bak
-    copy /Y "%PS_PROFILE%" "%PS_PROFILE%.bak" >nul
+    echo ==^> Backing up existing profile to %PS_PROFILE%.bak.%STAMP%
+    copy /Y "%PS_PROFILE%" "%PS_PROFILE%.bak.%STAMP%" >nul
 )
 
 REM Ensure the profile directory exists
@@ -39,8 +47,12 @@ echo   Done.
 
 REM --- Deploy Optimize-Windows.ps1 ---
 if exist "%OPT_SRC%" (
-    echo ==^> Copying optimize\windows.ps1 to %USERPROFILE%\Optimize-Windows.ps1
-    copy /Y "%OPT_SRC%" "%USERPROFILE%\Optimize-Windows.ps1" >nul
+    if exist "%OPT_DEST%" (
+        echo ==^> Backing up existing Optimize-Windows.ps1 to %OPT_DEST%.bak.%STAMP%
+        copy /Y "%OPT_DEST%" "%OPT_DEST%.bak.%STAMP%" >nul
+    )
+    echo ==^> Copying optimize\windows.ps1 to %OPT_DEST%
+    copy /Y "%OPT_SRC%" "%OPT_DEST%" >nul
     echo   Done.
 ) else (
     echo   optimize\windows.ps1 not found in repo - skipping.
@@ -51,5 +63,17 @@ echo ==^> Running Install-DevEnv (this will request admin elevation)...
 powershell -NoProfile -ExecutionPolicy RemoteSigned -Command "& { . '%PS_PROFILE%'; Install-DevEnv }"
 
 echo.
-echo Bootstrap complete! Restart your terminal.
+echo Bootstrap complete! Restart your terminal, then run doctor.
 pause
+exit /b 0
+
+:usage
+echo Usage: install.bat
+echo.
+echo Deploy the Windows PowerShell profile, back up any existing files with a
+echo timestamped .bak suffix, and run Install-DevEnv.
+exit /b 0
+
+:usage_error
+call :usage
+exit /b 1
