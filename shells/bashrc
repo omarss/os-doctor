@@ -468,7 +468,7 @@ EOF
   echo "==> Oh My Bash"
   if [[ ! -d "$HOME/.oh-my-bash" ]]; then
     bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohmybash/oh-my-bash/master/tools/install.sh)" \
-      --unattended
+      --unattended --keep-bashrc
   fi
 
   echo "==> Claude Code"
@@ -658,7 +658,7 @@ EOF
 
   _section "Shell"
   _doctor_check_dir "Oh My Bash" "$HOME/.oh-my-bash" \
-    'bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohmybash/oh-my-bash/master/tools/install.sh)" --unattended'
+    'bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohmybash/oh-my-bash/master/tools/install.sh)" --unattended --keep-bashrc'
 
   _section "WSL"
   if grep -qi microsoft /proc/version 2>/dev/null; then
